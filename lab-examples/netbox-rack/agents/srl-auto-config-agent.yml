@@ -1,0 +1,22 @@
+# See example_config.yml for an explanation of all the accepted fields
+auto_config_agent:
+   path: /opt/demo-agents/auto-config-agent/
+   launch-command: scripts/auto-config-agent.sh
+   search-command: python3 /opt/demo-agents/auto-config-agent/auto-config-agent.py
+   wait-for-config: Yes
+   failure-threshold: 5
+   failure-action: wait=forever
+   author: 'Nokia'
+   # Seems to have filesystem access issues during boot -> blocks boot
+   # version-command: ' cat build_version'
+   version-command: 'echo "1.0beta"'
+   # version-command: ' echo `whoami` >> /tmp/debug_version_command '
+   yang-modules:
+       names:
+           - "auto-config-agent"
+       source-directories:
+           - "/opt/demo-agents/auto-config-agent/models/"
+           - "/opt/srlinux/models/srl_nokia/models/common/"
+           - "/opt/srlinux/models/srl_nokia/models/interfaces/"
+           # Pulls in QoS
+           - "/opt/srlinux/models/srl_nokia/models/qos/"
