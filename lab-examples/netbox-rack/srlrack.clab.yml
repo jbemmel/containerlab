@@ -1,0 +1,69 @@
+# topology documentation: http://containerlab.dev/lab-examples/netbox-rack
+name: netbox-srl-rack
+
+mgmt:
+  network: netlab_mgmt # To connect Netbox to this network, see docker-compose.override.yml
+
+topology:
+  kinds:
+    srl:
+      # image: ghcr.io/nokia/srlinux
+      image: eccloud/srl-netbox-agent
+      extras:
+        srl-agents: [ agents/srl-auto-config-agent.yml, agents/srl-netbox-agent.yml ]
+
+      binds:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+
+      # Same for all leaves/spines
+      startup-config: |
+       set /system gnmi-server unix-socket admin-state enable
+       set /system gnmi-server rate-limit 65000
+       set /auto-config-agent gateway ipv4 10.0.0.1/24
+       set /auto-config-agent lacp active # reload-delay-secs 0
+       set /auto-config-agent igp bgp-unnumbered evpn model symmetric-irb auto-lags encoded-ipv6 bgp-peering ipv4 overlay-as 65000 route-reflector spine
+
+    linux:
+      image: eccloud/alpine-with-lldp
+
+  nodes:
+    mgmt:
+      kind: srl
+      type: ixrd1
+      group: fabric
+    spine1:
+      kind: srl
+      type: ixrd3l
+      group: fabric
+    leaf1:
+      kind: srl
+      type: ixrd2
+      group: fabric
+    leaf2:
+      kind: srl
+      type: ixrd2l
+      group: fabric
+
+    # Servers, rack not fully populated
+    s1:
+      kind: linux
+      group: servers
+      binds:
+      - /lib/modules:/lib/modules:ro # for bonding module
+      - interfaces.s1:/etc/network/interfaces
+
+    s2:
+      kind: linux
+      group: servers
+      binds:
+      - /lib/modules:/lib/modules:ro # for bonding module
+      - interfaces.s2:/etc/network/interfaces
+
+  links:
+  - endpoints: ["leaf1:e1-1", "s1:eth1"]
+  - endpoints: ["leaf2:e1-1", "s1:eth2"]
+  - endpoints: ["leaf1:e1-2", "s2:eth1"]
+  - endpoints: ["leaf2:e1-2", "s2:eth2"]
+
+  - endpoints: ["leaf1:e1-49", "spine1:e1-1"]
+  - endpoints: ["leaf2:e1-49", "spine1:e1-2"]
