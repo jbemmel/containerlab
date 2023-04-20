@@ -17,10 +17,10 @@ topology:
 
       # Same for all leaves/spines
       startup-config: |
-       set /system gnmi-server unix-socket admin-state enable
+       set /system gnmi-server unix-socket admin-state enable use-authentication false
        set /system gnmi-server rate-limit 65000
        set /auto-config-agent gateway ipv4 10.0.0.1/24
-       set /auto-config-agent lacp active # reload-delay-secs 0
+       set /auto-config-agent lacp active lacp-fallback 10 # reload-delay-secs 0
        set /auto-config-agent igp bgp-unnumbered evpn model symmetric-irb auto-lags encoded-ipv6 bgp-peering ipv4 overlay-as 65000 route-reflector spine
 
     linux:
@@ -50,6 +50,7 @@ topology:
       group: servers
       binds:
       - /lib/modules:/lib/modules:ro # for bonding module
+      # - interfaces.dhcp:/etc/network/interfaces
       - interfaces.s1:/etc/network/interfaces
 
     s2:
