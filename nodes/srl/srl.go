@@ -82,9 +82,12 @@ var (
 		"ixrd3":  "7220IXRD3.yml",
 		"ixrd2l": "7220IXRD2L.yml",
 		"ixrd3l": "7220IXRD3L.yml",
+		"ixrd4":  "7220IXRD4.yml",
 		"ixrd5":  "7220IXRD5.yml",
+		"ixrd5t": "7220IXRD5T.yml",
 		"ixrh2":  "7220IXRH2.yml",
 		"ixrh3":  "7220IXRH3.yml",
+		"ixrh4":  "7220IXRH4.yml",
 		"ixr6":   "7250IXR6.yml",
 		"ixr6e":  "7250IXR6e.yml",
 		"ixr10":  "7250IXR10.yml",
@@ -206,11 +209,20 @@ func (s *srl) PreDeploy(_ context.Context, params *nodes.PreDeployParams) error 
 		agents := s.Cfg.Extras.SRLAgents
 
 		appmgr := filepath.Join(s.Cfg.LabDir, "config", "appmgr")
-
 		utils.CreateDirectory(appmgr, 0777)
 
+		// process extras -> agents configurations
 		for _, fullpath := range agents {
 			basename := filepath.Base(fullpath)
+			// if it is a url extract filename from url or content-disposition header
+			if utils.IsHttpUri(fullpath) {
+				basename = utils.FilenameForURL(fullpath)
+			}
+			// enforce yml extension
+			if ext := filepath.Ext(basename); !(ext == ".yml" || ext == ".yaml") {
+				basename = basename + ".yml"
+			}
+
 			dst := filepath.Join(appmgr, basename)
 			if err := utils.CopyFile(fullpath, dst, 0644); err != nil {
 				return fmt.Errorf("agent copy src %s -> dst %s failed %v", fullpath, dst, err)

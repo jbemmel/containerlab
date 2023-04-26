@@ -4,15 +4,15 @@ go 1.18
 
 require (
 	github.com/awalterschulze/gographviz v2.0.3+incompatible
-	github.com/cloudflare/cfssl v1.6.3
+	github.com/cloudflare/cfssl v1.6.4
 	github.com/containerd/containerd v1.7.0
 	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.2.0
 	github.com/containers/common v0.52.0
-	github.com/containers/podman/v4 v4.4.4
+	github.com/containers/podman/v4 v4.5.0
 	github.com/digitalocean/go-openvswitch v0.0.0-20201214180534-ce0f183468d8
 	github.com/docker/distribution v2.8.1+incompatible
-	github.com/docker/docker v23.0.3+incompatible
+	github.com/docker/docker v23.0.4+incompatible
 	github.com/docker/go-connections v0.4.1-0.20210727194412-58542c764a11
 	github.com/docker/go-units v0.5.0
 	github.com/dustin/go-humanize v1.0.1
@@ -20,18 +20,18 @@ require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.3.0
 	github.com/h2non/gock v1.2.0
-	github.com/hairyhenderson/gomplate/v3 v3.11.5-0.20230311142256-ea986e7404d1
+	github.com/hairyhenderson/gomplate/v3 v3.11.5
 	github.com/hashicorp/go-version v1.6.0
 	github.com/joho/godotenv v1.5.1
-	github.com/jsimonetti/rtnetlink v1.3.1
+	github.com/jsimonetti/rtnetlink v1.3.2
 	github.com/kellerza/template v0.0.6
 	github.com/klauspost/cpuid v1.3.1
 	github.com/mackerelio/go-osstat v0.2.4
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/olekukonko/tablewriter v0.0.5
-	github.com/opencontainers/runtime-spec v1.1.0-rc.1
+	github.com/opencontainers/runtime-spec v1.1.0-rc.2
 	github.com/pkg/errors v0.9.1
-	github.com/scrapli/scrapligo v1.1.7
+	github.com/scrapli/scrapligo v1.1.8
 	github.com/sirupsen/logrus v1.9.0
 	github.com/spf13/cobra v1.7.0
 	github.com/tklauser/numcpus v0.6.0
@@ -137,7 +137,7 @@ require (
 	github.com/containerd/go-runc v1.0.0 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3 // indirect
 	github.com/containerd/ttrpc v1.2.1 // indirect
-	github.com/containers/buildah v1.29.0 // indirect
+	github.com/containers/buildah v1.30.0 // indirect
 	github.com/containers/image v3.0.2+incompatible // indirect
 	github.com/containers/image/v5 v5.25.0 // indirect
 	github.com/containers/libtrust v0.0.0-20230121012942-c1716e8a8d01 // indirect
@@ -159,7 +159,6 @@ require (
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/freddierice/go-losetup v0.0.0-20170407175016-fc9adea44124 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
-	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-git/gcfg v1.5.0 // indirect
 	github.com/go-git/go-billy/v5 v5.3.1 // indirect
 	github.com/go-git/go-git/v5 v5.4.2 // indirect
@@ -231,7 +230,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0-rc2.0.20221005185240-3a7f492d3f1b // indirect
 	github.com/opencontainers/runc v1.1.5 // indirect
-	github.com/opencontainers/runtime-tools v0.9.1-0.20221107090550-2e043c6bd626 // indirect
+	github.com/opencontainers/runtime-tools v0.9.1-0.20230317050512-e931285f4b69 // indirect
 	github.com/opencontainers/selinux v1.11.0 // indirect
 	github.com/ostreedev/ostree-go v0.0.0-20210805093236-719684c64e4f // indirect
 	github.com/otiai10/copy v1.2.0 // indirect
@@ -266,7 +265,7 @@ require (
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230204201903-c31fa085b70e // indirect
 	gocloud.dev v0.29.0 // indirect
 	golang.org/x/mod v0.9.0 // indirect
-	golang.org/x/net v0.9.0 // indirect
+	golang.org/x/net v0.9.0
 	golang.org/x/oauth2 v0.6.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/text v0.9.0
