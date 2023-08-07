@@ -119,14 +119,14 @@ name: srl02
 
 mgmt:
   network: custom_mgmt                # management network name
-  ipv4_subnet: 172.100.100.0/24       # ipv4 range
-  ipv6_subnet: 2001:172:100:100::/80  # ipv6 range (optional)
+  ipv4-subnet: 172.100.100.0/24       # ipv4 range
+  ipv6-subnet: 2001:172:100:100::/80  # ipv6 range (optional)
 
 topology:
 # the rest of the file is omitted for brevity
 ```
 
-With these settings in place, container will get their IP addresses from the specified ranges accordingly.
+With these settings in place, the container will get their IP addresses from the specified ranges accordingly.
 
 #### user-defined addresses
 
@@ -137,15 +137,15 @@ For such cases, users can define the desired IPv4/6 addresses on a per-node basi
 ```yaml
 mgmt:
   network: fixedips
-  ipv4_subnet: 172.100.100.0/24
-  ipv6_subnet: 2001:172:100:100::/80
+  ipv4-subnet: 172.100.100.0/24
+  ipv6-subnet: 2001:172:100:100::/80
 
 topology:
   nodes:
     n1:
       kind: srl
-      mgmt_ipv4: 172.100.100.11       # set ipv4 address on management network
-      mgmt_ipv6: 2001:172:100:100::11 # set ipv6 address on management network
+      mgmt-ipv4: 172.100.100.11       # set ipv4 address on management network
+      mgmt-ipv6: 2001:172:100:100::11 # set ipv6 address on management network
 ```
 
 Users can specify either IPv4 or IPv6 or both addresses. If one of the addresses is omitted, it will be assigned by container runtime in an arbitrary fashion.
@@ -153,6 +153,7 @@ Users can specify either IPv4 or IPv6 or both addresses. If one of the addresses
 !!!note
     1. If user-defined IP addresses are needed, they must be provided for all containers attached to a given network to avoid address collision.
     2. IPv4/6 addresses set on a node level must be from the management network range.
+    3. IPv6 addresses are truncated by Docker[^1], therefore do not use bytes 5 through 8 of the IPv6 network range.
 
 #### MTU
 
@@ -209,9 +210,25 @@ It is possible to set the desired gateway IP (that is the IP assigned to the bri
 mgmt:
   network: custom-net
   bridge: mybridge
-  ipv4_subnet: 10.20.30.0/24 # ip range for the docker network
+  ipv4-subnet: 10.20.30.0/24 # ip range for the docker network
   ipv4-gw: 10.20.30.100 # set custom gateway ip
 ```
+
+#### IP range
+
+By specifying `ipv4-range/ipv6-range` under the management network, users limit the network range from which IP addresses are allocated for a management subnet.
+
+```yaml
+mgmt:
+  network: custom-net
+  ipv4-subnet: 10.20.30.0/24 #(2)!
+  ipv4-range: 10.20.30.128/25 #(1)!
+```
+
+1. Container runtime will assign IP addresses from the `10.20.30.128/25` subnet, and `10.20.30.0/25` will not be considered.
+2. The subnet must be specified for IP ranges to work. Also note that if the container network already exists and uses a different range, then the IP range setting won't have effect.
+
+With this approach, users can prevent IP address overlap with nodes deployed on the same management network by other orchestration systems.
 
 #### external access
 
@@ -287,7 +304,7 @@ Management network is used to provide management access to the NOS containers, i
 
 The above diagram shows how links are created in the topology definition file. In this example, the datapath consists of the two virtual point-to-point wires between SR Linux and cEOS containers. These links are created on-demand by containerlab itself.
 
-The p2p links are provided by the `veth` device pairs where each end of the `veth` pair is attached to a respective container.
+The p2p links are typically provided by the `veth` device pairs where each end of the `veth` pair is attached to a respective container.
 
 ### Link MTU
 
@@ -358,6 +375,87 @@ This is best illustrated with the following diagram:
 
 <div class="mxgraph" style="max-width:100%;border:1px solid transparent;margin:0 auto; display:block;" data-mxgraph="{&quot;page&quot;:14,&quot;zoom&quot;:1.5,&quot;highlight&quot;:&quot;#0000ff&quot;,&quot;nav&quot;:true,&quot;check-visible-state&quot;:true,&quot;resize&quot;:true,&quot;url&quot;:&quot;https://raw.githubusercontent.com/srl-labs/containerlab/diagrams/containerlab.drawio&quot;}"></div>
 
+### MACVLAN links
+
+In addition to the `veth` links, containerlab supports `macvlan` links. This type of links is useful when users want to connect containers to the host interface/network directly. This is achieved by defining a link endpoints which has one end defined with a special `macvlan:<host-iface-name>` signature.
+
+Consider the following example where we connect a Linux container `l1` to the hosts `enp0s3` interface:
+
+```yaml
+name: macvlan
+
+topology:
+  nodes:
+    l1:
+      kind: linux
+      image: alpine:3
+
+  links:
+    - endpoints: ["l1:eth1", "macvlan:enp0s3"]
+```
+
+This topology will result in l1 node having its `eth1` interface connected to the `enp0s3` interface of the host as per the diagram below:
+
+<div class="mxgraph" style="max-width:100%;border:1px solid transparent;margin:0 auto; display:block;" data-mxgraph='{"page":16,"zoom":1.5,"highlight":"#0000ff","nav":true,"check-visible-state":true,"resize":true,"url":"https://raw.githubusercontent.com/srl-labs/containerlab/diagrams/containerlab.drawio"}'></div>
+
+Containerlab will create a macvlan interface in the bridge mode, attach it to the parent `enp0s3` interface and then move it to the container's net namespace and name it `eth1`, as instructed by the endpoint definition in the topology.
+
+Users then can configure the `eth1` interface inside the container as they would do with any other interface. As per the diagram above, we configure `eth1` interface with ipv4 address from the host's `enp0s3` interface subnet:
+
+```bash title="entering the container's shell"
+docker exec -it clab-macvlan-l1 ash
+```
+
+```bash
+# adding v4 address to the eth1 interface
+ip address add 10.0.0.111/24 dev eth1
+```
+
+Once v4 address is assigned to the macvlan inteface, we can test the connectivity by pinging default gateway of the host:
+
+```bash
+❯ ping 10.0.0.1
+PING 10.0.0.1 (10.0.0.1): 56 data bytes
+64 bytes from 10.0.0.1: seq=0 ttl=64 time=0.545 ms
+64 bytes from 10.0.0.1: seq=1 ttl=64 time=0.243 ms
+```
+
+When capturing packets from the hosts's `enp0s3` interface we can see that the ping packets are coming through it using the mac address assigned to the macvlan inteface:
+
+```bash
+❯ tcpdump -nnei enp0s3 icmp
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on enp0s3, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+22:35:02.430901 aa:c1:ab:72:b3:fe > fa:16:3e:af:03:05, ethertype IPv4 (0x0800), length 98: 10.0.0.111 > 10.0.0.1: ICMP echo request, id 24, seq 4, length 64
+22:35:02.431017 fa:16:3e:af:03:05 > aa:c1:ab:72:b3:fe, ethertype IPv4 (0x0800), length 98: 10.0.0.1 > 10.0.0.111: ICMP echo reply, id 24, seq 4, length 64
+```
+
+## Manual control over the management network
+
+By default containerlab creates a docker network named `clab` and attaches all the nodes to this network. This network is used as a management network for the nodes and is managed by the container runtime such as docker or podman.
+
+Container runtime is responsible for creating the `eth0` interface inside the container and attaching it to the `clab` network. This interface is used by the container to communicate with the management network. For that reason the links users create in the topology's `links` section typically do not include the `eth0` interface.
+
+However, there might be cases when users want to take control over `eth0` interface management. For example, they might want to connect `eth0` to a different network or even another container's interface. To achieve that, users can instruct container runtime to not manage the `eth0` interface and leave it to the user, using [`network-mode: none`](nodes.md#network-mode) setting.
+
+Consider the following example, where node1's management interface `eth0` is provided in the `links` section and connects to node2's `eth1` interface:
+
+```yaml
+name: e0
+
+topology:
+  nodes:
+    node1:
+      kind: linux
+      image: alpine:3
+      network-mode: none
+    node2:
+      kind: linux
+      image: alpine:3
+  links:
+    - endpoints: ["node1:eth0", "node2:eth1"]
+```
+
 ## DNS
 
 When containerlab finishes the nodes deployment, it also creates static DNS entries inside the `/etc/hosts` file so that users can access the nodes using their DNS names.
@@ -374,3 +472,5 @@ For a lab named `demo` with two nodes named `l1` and `l2` containerlab will crea
 2001:172:20:20::3       clab-demo-l2
 ###### CLAB-demo-END ######
 ```
+
+[^1]: See <https://github.com/srl-labs/containerlab/issues/1302#issuecomment-1533796941> for details and links to the original discussion.

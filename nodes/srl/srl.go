@@ -22,6 +22,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/srl-labs/containerlab/cert"
 	"github.com/srl-labs/containerlab/clab/exec"
 	"github.com/srl-labs/containerlab/nodes"
 	"github.com/srl-labs/containerlab/types"
@@ -49,10 +50,14 @@ set / system gnmi-server trace-options [ request response common ]
 set / system gnmi-server unix-socket admin-state enable
 set / system json-rpc-server admin-state enable network-instance mgmt http admin-state enable
 set / system json-rpc-server admin-state enable network-instance mgmt https admin-state enable tls-profile clab-profile
+set / system snmp community public
+set / system snmp network-instance mgmt
+set / system snmp network-instance mgmt admin-state enable
 set / system lldp admin-state enable
 set / system aaa authentication idle-timeout 7200
 {{/* enabling interfaces referenced as endpoints for a node (both e1-2 and e1-3-1 notations) */}}
 {{- range $ep := .Endpoints }}
+{{- if eq $ep.EndpointName "mgmt0" }}{{- continue }}{{- end}}
 {{- $parts := ($ep.EndpointName | strings.ReplaceAll "e" "" | strings.Split "-") -}}
 set / interface ethernet-{{index $parts 0}}/{{index $parts 1}} admin-state enable
   {{- if eq (len $parts) 3 }}
@@ -65,7 +70,7 @@ commit save`
 )
 
 var (
-	kindnames = []string{"srl", "nokia_srlinux"}
+	KindNames = []string{"srl", "nokia_srlinux"}
 	srlSysctl = map[string]string{
 		"net.ipv4.ip_forward":              "0",
 		"net.ipv6.conf.all.disable_ipv6":   "0",
@@ -74,7 +79,7 @@ var (
 		"net.ipv6.conf.all.autoconf":       "0",
 		"net.ipv6.conf.default.autoconf":   "0",
 	}
-	defaultCredentials = nodes.NewCredentials("admin", "admin")
+	defaultCredentials = nodes.NewCredentials("admin", "NokiaSrl1!")
 
 	srlTypes = map[string]string{
 		"ixrd1":  "7220IXRD1.yml",
@@ -100,19 +105,25 @@ var (
 	//go:embed topology/*
 	topologies embed.FS
 
-	saveCmd          = `sr_cli -d "tools system configuration save"`
-	mgmtServerRdyCmd = `sr_cli -d "info from state system app-management application mgmt_server state | grep running"`
+	saveCmd          = `/opt/srlinux/bin/sr_cli -d "tools system configuration save"`
+	mgmtServerRdyCmd = `/opt/srlinux/bin/sr_cli -d "info from state system app-management application mgmt_server state | grep running"`
 	// readyForConfigCmd checks the output of a file on srlinux which will be populated once the mgmt server is ready to accept config.
 	readyForConfigCmd = "cat /etc/opt/srlinux/devices/app_ephemeral.mgmt_server.ready_for_config"
 
 	srlCfgTpl, _ = template.New("srl-tls-profile").
 			Funcs(gomplate.CreateFuncs(context.Background(), new(data.Data))).
 			Parse(srlConfigCmdsTpl)
+
+	requiredKernelVersion = &utils.KernelVersion{
+		Major:    4,
+		Minor:    10,
+		Revision: 0,
+	}
 )
 
 // Register registers the node in the NodeRegistry.
 func Register(r *nodes.NodeRegistry) {
-	r.Register(kindnames, func() nodes.Node {
+	r.Register(KindNames, func() nodes.Node {
 		return new(srl)
 	}, defaultCredentials)
 }
@@ -121,6 +132,11 @@ type srl struct {
 	nodes.DefaultNode
 	// startup-config passed as a path to a file with CLI instructions will be read into this byte slice
 	startupCliCfg []byte
+
+	// Params provided in Pre-Deploy, that srl uses in Post-Deploy phase
+	// to generate certificates
+	cert         *cert.Cert
+	topologyName string
 }
 
 func (s *srl) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
@@ -195,15 +211,6 @@ func (s *srl) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
 func (s *srl) PreDeploy(_ context.Context, params *nodes.PreDeployParams) error {
 	utils.CreateDirectory(s.Cfg.LabDir, 0777)
 
-	certificate, err := s.LoadOrGenerateCertificate(params.Cert, params.TopologyName)
-	if err != nil {
-		return nil
-	}
-
-	// set the certificate data
-	s.Config().TLSCert = string(certificate.Cert)
-	s.Config().TLSKey = string(certificate.Key)
-
 	// Create appmgr subdir for agent specs and copy files, if needed
 	if s.Cfg.Extras != nil && len(s.Cfg.Extras.SRLAgents) != 0 {
 		agents := s.Cfg.Extras.SRLAgents
@@ -231,7 +238,7 @@ func (s *srl) PreDeploy(_ context.Context, params *nodes.PreDeployParams) error 
 	}
 
 	// mount authorized_keys file to enable passwordless login
-	authzKeysPath := filepath.Join(filepath.Dir(s.Cfg.LabDir), "authorized_keys")
+	authzKeysPath := params.TopoPaths.AuthorizedKeysFilename()
 	if utils.FileExists(authzKeysPath) {
 		s.Cfg.Binds = append(s.Cfg.Binds,
 			fmt.Sprint(authzKeysPath, ":/root/.ssh/authorized_keys:ro"),
@@ -240,11 +247,34 @@ func (s *srl) PreDeploy(_ context.Context, params *nodes.PreDeployParams) error 
 		)
 	}
 
+	// store the certificate-related parameters
+	// for cert generation to happen in Post-Deploy phase with mgmt IPs as SANs
+	s.cert = params.Cert
+	s.topologyName = params.TopologyName
+
 	return s.createSRLFiles()
 }
 
 func (s *srl) PostDeploy(ctx context.Context, params *nodes.PostDeployParams) error {
 	log.Infof("Running postdeploy actions for Nokia SR Linux '%s' node", s.Cfg.ShortName)
+
+	// add the ips as SANs
+	for _, ip := range []string{s.Cfg.MgmtIPv4Address, s.Cfg.MgmtIPv6Address} {
+		if ip != "" {
+			s.Cfg.SANs = append(s.Cfg.SANs, ip)
+		}
+	}
+
+	// generate the certificate
+	certificate, err := s.LoadOrGenerateCertificate(s.cert, s.topologyName)
+	if err != nil {
+		return err
+	}
+
+	// set the certificate data
+	s.Config().TLSCert = string(certificate.Cert)
+	s.Config().TLSKey = string(certificate.Key)
+
 	// Populate /etc/hosts for service discovery on mgmt interface
 	if err := s.populateHosts(ctx, params.Nodes); err != nil {
 		log.Warnf("Unable to populate hosts for node %q: %v", s.Cfg.ShortName, err)
@@ -266,7 +296,11 @@ func (s *srl) PostDeploy(ctx context.Context, params *nodes.PostDeployParams) er
 		return err
 	}
 
-	return s.addOverlayCLIConfig(ctx)
+	if err := s.addOverlayCLIConfig(ctx); err != nil {
+		return err
+	}
+
+	return s.generateCheckpoint(ctx)
 }
 
 func (s *srl) SaveConfig(ctx context.Context) error {
@@ -301,8 +335,20 @@ func (s *srl) Ready(ctx context.Context) error {
 			// two commands are checked, first if the mgmt_server is running
 			cmd, _ := exec.NewExecCmdFromString(mgmtServerRdyCmd)
 			execResult, err := s.RunExec(ctx, cmd)
-			if err != nil {
+			if err != nil || (execResult != nil && execResult.GetReturnCode() != 0) {
+				logMsg := "mgmt_server status check failed"
+
+				if err != nil {
+					logMsg += fmt.Sprintf(" error: %v", err)
+				}
+
+				if execResult.GetReturnCode() != 0 {
+					logMsg += fmt.Sprintf(", output: \n%s", execResult)
+				}
+
+				log.Debug(logMsg)
 				time.Sleep(retryTimer)
+
 				continue
 			}
 
@@ -344,6 +390,31 @@ func (s *srl) Ready(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+// checkKernelVersion emits a warning if the present kernel version is lower than the required one.
+func (*srl) checkKernelVersion() error {
+	// retrieve running kernel version
+	kv, err := utils.GetKernelVersion()
+	if err != nil {
+		return err
+	}
+
+	// do the comparison
+	if !kv.GreaterOrEqual(requiredKernelVersion) {
+		log.Infof("Nokia SR Linux v23.3.1+ requires a kernel version greater than %s. Detected kernel version: %s", requiredKernelVersion, kv)
+	}
+	return nil
+}
+
+func (s *srl) CheckDeploymentConditions(ctx context.Context) error {
+	// perform the srl specific kernel version check
+	err := s.checkKernelVersion()
+	if err != nil {
+		return err
+	}
+
+	return s.DefaultNode.CheckDeploymentConditions(ctx)
 }
 
 func (s *srl) createSRLFiles() error {
@@ -471,7 +542,7 @@ func (s *srl) addDefaultConfig(ctx context.Context) error {
 		return err
 	}
 
-	cmd, err := exec.NewExecCmdFromString(`bash -c "sr_cli -ed < /tmp/clab-config"`)
+	cmd, err := exec.NewExecCmdFromString(`bash -c "/opt/srlinux/bin/sr_cli -ed < /tmp/clab-config"`)
 	if err != nil {
 		return err
 	}
@@ -501,7 +572,27 @@ func (s *srl) addOverlayCLIConfig(ctx context.Context) error {
 		return err
 	}
 
-	cmd, _ = exec.NewExecCmdFromString(`bash -c "sr_cli -ed --post 'commit save' < tmp/clab-config"`)
+	cmd, _ = exec.NewExecCmdFromString(`bash -c "/opt/srlinux/bin/sr_cli -ed --post 'commit save' < tmp/clab-config"`)
+	execResult, err := s.RunExec(ctx, cmd)
+	if err != nil {
+		return err
+	}
+
+	if len(execResult.GetStdErrString()) != 0 {
+		return fmt.Errorf("%w:%s", nodes.ErrCommandExecError, execResult.GetStdErrString())
+	}
+
+	log.Debugf("node %s. stdout: %s, stderr: %s", s.Cfg.ShortName, execResult.GetStdOutString(), execResult.GetStdErrString())
+
+	return nil
+}
+
+func (s *srl) generateCheckpoint(ctx context.Context) error {
+	cmd, err := exec.NewExecCmdFromString(`bash -c '/opt/srlinux/bin/sr_cli /tools system configuration generate-checkpoint name clab-initial comment \"set by containerlab\"'`)
+	if err != nil {
+		return err
+	}
+
 	execResult, err := s.RunExec(ctx, cmd)
 	if err != nil {
 		return err
@@ -565,10 +656,17 @@ func (s *srl) populateHosts(ctx context.Context, nodes map[string]nodes.Node) er
 
 // CheckInterfaceName checks if a name of the interface referenced in the topology file correct.
 func (s *srl) CheckInterfaceName() error {
-	ifRe := regexp.MustCompile(`e\d+-\d+(-\d+)?`)
+	// allow eX-X-X and mgmt0 interface names
+	ifRe := regexp.MustCompile(`e\d+-\d+(-\d+)?|mgmt0`)
+	nm := strings.ToLower(s.Cfg.NetworkMode)
+
 	for _, e := range s.Config().Endpoints {
 		if !ifRe.MatchString(e.EndpointName) {
 			return fmt.Errorf("nokia sr linux interface name %q doesn't match the required pattern. SR Linux interfaces should be named as e1-1 or e1-1-1", e.EndpointName)
+		}
+
+		if e.EndpointName == "mgmt0" && nm != "none" {
+			return fmt.Errorf("mgmt0 interface name is not allowed for %s node when network mode is not set to none", s.Cfg.ShortName)
 		}
 	}
 

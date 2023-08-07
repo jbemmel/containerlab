@@ -115,10 +115,13 @@ func (d *DockerRuntime) WithMgmtNet(n *types.MgmtNet) {
 		netRes, err := d.Client.NetworkInspect(context.TODO(), d.mgmt.Network, dockerTypes.NetworkInspectOptions{})
 		// if the network is succesfully found, set the bridge used by it
 		if err == nil {
-			d.mgmt.Bridge = "br-" + netRes.ID[:12]
+			if name, exists := netRes.Options["com.docker.network.bridge.name"]; exists {
+				d.mgmt.Bridge = name
+			} else {
+				d.mgmt.Bridge = "br-" + netRes.ID[:12]
+			}
 			log.Debugf("detected network name in use: %s, backed by a bridge %s", d.mgmt.Network, d.mgmt.Bridge)
 		}
-
 	}
 }
 
@@ -159,20 +162,28 @@ func (d *DockerRuntime) CreateNet(ctx context.Context) (err error) {
 			if d.mgmt.IPv4Gw != "" {
 				v4gw = d.mgmt.IPv4Gw
 			}
-			ipamConfig = append(ipamConfig, network.IPAMConfig{
+			ipamCfg := network.IPAMConfig{
 				Subnet:  d.mgmt.IPv4Subnet,
 				Gateway: v4gw,
-			})
+			}
+			if d.mgmt.IPv4Range != "" {
+				ipamCfg.IPRange = d.mgmt.IPv4Range
+			}
+			ipamConfig = append(ipamConfig, ipamCfg)
 		}
 
 		if d.mgmt.IPv6Subnet != "" {
 			if d.mgmt.IPv6Gw != "" {
 				v6gw = d.mgmt.IPv6Gw
 			}
-			ipamConfig = append(ipamConfig, network.IPAMConfig{
+			ipamCfg := network.IPAMConfig{
 				Subnet:  d.mgmt.IPv6Subnet,
 				Gateway: v6gw,
-			})
+			}
+			if d.mgmt.IPv6Range != "" {
+				ipamCfg.IPRange = d.mgmt.IPv6Range
+			}
+			ipamConfig = append(ipamConfig, ipamCfg)
 			enableIPv6 = true
 		}
 
@@ -245,7 +256,33 @@ func (d *DockerRuntime) CreateNet(ctx context.Context) (err error) {
 	// this was added to allow mgmt network gw ip to be available in a startup config templation step (ceos)
 	var v4, v6 string
 	if v4, v6, err = utils.FirstLinkIPs(bridgeName); err != nil {
-		return err
+		log.Warn(
+			"failed gleaning v4 and/or v6 addresses from bridge via netlink," +
+				" falling back to docker network inspect data",
+		)
+
+		for _, ipamEntry := range netResource.IPAM.Config {
+			addr := ipamEntry.Gateway
+
+			// this is terribly janky, *but* we know docker will be only putting valid v4/v6
+			// addresses in here and we only care about differentiating between the two flavors
+			if strings.Count(addr, ".") == 3 {
+				v4 = addr
+			} else if netResource.EnableIPv6 {
+				v6 = addr
+			}
+
+			if v4 != "" && v6 != "" {
+				break
+			}
+		}
+
+		if v4 == "" && v6 == "" {
+			// didn't get address in any way -- the case of needing to inspect the docker ipam
+			// config should be less common (for dind use case basically), so we can just return
+			// the main error form checking via ip link
+			return err
+		}
 	}
 
 	d.mgmt.IPv4Gw = v4
@@ -451,6 +488,7 @@ func (d *DockerRuntime) GetNSPath(ctx context.Context, cID string) (string, erro
 	if err != nil {
 		return "", err
 	}
+
 	return "/proc/" + strconv.Itoa(cJSON.State.Pid) + "/ns/net", nil
 }
 
@@ -586,7 +624,7 @@ func (d *DockerRuntime) ListContainers(ctx context.Context, gfilters []*types.Ge
 		nr = append(nr, bridgenet...)
 	}
 
-	return d.produceGenericContainerList(ctrs, nr)
+	return d.produceGenericContainerList(ctx, ctrs, nr)
 }
 
 func (d *DockerRuntime) GetContainer(ctx context.Context, cID string) (*runtime.GenericContainer, error) {
@@ -626,7 +664,7 @@ func (*DockerRuntime) buildFilterString(gfilters []*types.GenericFilter) filters
 }
 
 // Transform docker-specific to generic container format.
-func (d *DockerRuntime) produceGenericContainerList(inputContainers []dockerTypes.Container,
+func (d *DockerRuntime) produceGenericContainerList(ctx context.Context, inputContainers []dockerTypes.Container,
 	inputNetworkResources []dockerTypes.NetworkResource,
 ) ([]runtime.GenericContainer, error) {
 	var result []runtime.GenericContainer
@@ -651,9 +689,21 @@ func (d *DockerRuntime) produceGenericContainerList(inputContainers []dockerType
 			Labels:          i.Labels,
 			NetworkSettings: runtime.GenericMgmtIPs{},
 		}
+
+		ctr.Ports = make([]*types.GenericPortBinding, len(i.Ports))
+		for x, p := range i.Ports {
+			ctr.Ports[x] = genericPortFromDockerPort(p)
+		}
+
 		ctr.SetRuntime(d)
 
 		bridgeName := d.mgmt.Network
+
+		var err error
+		ctr.Pid, err = d.containerPid(ctx, i.ID)
+		if err != nil {
+			return nil, err
+		}
 
 		// if bridgeName is empty, try to find a network created by clab that the container is connected to
 		if bridgeName == "" && inputNetworkResources != nil {
@@ -705,6 +755,15 @@ func (d *DockerRuntime) produceGenericContainerList(inputContainers []dockerType
 	}
 
 	return result, nil
+}
+
+func genericPortFromDockerPort(p dockerTypes.Port) *types.GenericPortBinding {
+	return &types.GenericPortBinding{
+		HostIP:        p.IP,
+		HostPort:      int(p.PublicPort),
+		ContainerPort: int(p.PrivatePort),
+		Protocol:      p.Type,
+	}
 }
 
 // Exec executes cmd on container identified with id and returns stdout, stderr bytes and an error.
@@ -906,4 +965,13 @@ func (d *DockerRuntime) GetContainerStatus(ctx context.Context, cID string) runt
 		return runtime.Stopped
 	}
 	return runtime.NotFound
+}
+
+// containerPid returns the pid of a container by its ID using inspect.
+func (d *DockerRuntime) containerPid(ctx context.Context, cID string) (int, error) {
+	inspect, err := d.Client.ContainerInspect(ctx, cID)
+	if err != nil {
+		return 0, fmt.Errorf("container %q cannot be found", cID)
+	}
+	return inspect.State.Pid, nil
 }

@@ -11,11 +11,13 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/srl-labs/containerlab/cert"
 	"github.com/srl-labs/containerlab/clab"
+	"github.com/srl-labs/containerlab/clab/dependency_manager"
 	"github.com/srl-labs/containerlab/clab/exec"
 	"github.com/srl-labs/containerlab/nodes"
 	"github.com/srl-labs/containerlab/runtime"
@@ -146,6 +148,10 @@ func deployFn(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if err = c.LoadKernelModules(); err != nil {
+		return err
+	}
+
 	log.Info("Creating lab directory: ", c.TopoPaths.TopologyLabDir())
 	utils.CreateDirectory(c.TopoPaths.TopologyLabDir(), 0755)
 
@@ -167,7 +173,7 @@ func deployFn(_ *cobra.Command, _ []string) error {
 	// define the attributes used to generate the CA Cert
 	caCertInput := &cert.CACSRInput{
 		CommonName:   c.Config.Name + " lab CA",
-		Expiry:       "87600h",
+		Expiry:       time.Until(time.Now().AddDate(1, 0, 0)), // should expire in a year from now
 		Organization: "containerlab",
 	}
 
@@ -212,11 +218,13 @@ func deployFn(_ *cobra.Command, _ []string) error {
 		n.Config().ExtraHosts = extraHosts
 	}
 
-	nodesWg, err := c.CreateNodes(ctx, nodeWorkers)
+	dm := dependency_manager.NewDependencyManager()
+
+	nodesWg, err := c.CreateNodes(ctx, nodeWorkers, dm)
 	if err != nil {
 		return err
 	}
-	c.CreateLinks(ctx, linkWorkers)
+	c.CreateLinks(ctx, linkWorkers, dm)
 	if nodesWg != nil {
 		nodesWg.Wait()
 	}
@@ -226,7 +234,7 @@ func deployFn(_ *cobra.Command, _ []string) error {
 	for _, n := range c.Nodes {
 		err = n.UpdateConfigWithRuntimeInfo(ctx)
 		if err != nil {
-			log.Errorf("failed to update node runtime infromation for node %s: %v", n.Config().ShortName, err)
+			log.Errorf("failed to update node runtime information for node %s: %v", n.Config().ShortName, err)
 		}
 	}
 
@@ -234,7 +242,7 @@ func deployFn(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if err := c.GenerateExports(topoDataF, exportTemplate); err != nil {
+	if err := c.GenerateExports(ctx, topoDataF, exportTemplate); err != nil {
 		return err
 	}
 
@@ -262,7 +270,7 @@ func deployFn(_ *cobra.Command, _ []string) error {
 
 	// generate graph of the lab topology
 	if graph {
-		if err = c.GenerateGraph(topo); err != nil {
+		if err = c.GenerateDotGraph(); err != nil {
 			log.Error(err)
 		}
 	}

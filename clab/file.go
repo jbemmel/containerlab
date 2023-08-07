@@ -13,6 +13,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/a8m/envsubst"
 	"github.com/hairyhenderson/gomplate/v3"
 	"github.com/hairyhenderson/gomplate/v3/data"
 
@@ -70,10 +71,13 @@ func (c *CLab) GetTopology(topo, varsFile string) error {
 	log.Debugf("topology:\n%s\n", buf.String())
 
 	// expand env vars if any
-	yamlFile := []byte(os.ExpandEnv(buf.String()))
-	err = yaml.UnmarshalStrict(yamlFile, c.Config)
+	yamlFile, err := envsubst.Bytes(buf.Bytes())
 	if err != nil {
 		return err
+	}
+	err = yaml.UnmarshalStrict(yamlFile, c.Config)
+	if err != nil {
+		return fmt.Errorf("%w\nConsult with release notes to see if any fields were changed/removed", err)
 	}
 
 	c.Config.Topology.ImportEnvs()

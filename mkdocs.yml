@@ -16,6 +16,7 @@ nav:
           - Juniper cRPD: manual/kinds/crpd.md
           - Juniper vMX: manual/kinds/vr-vmx.md
           - Juniper vQFX: manual/kinds/vr-vqfx.md
+          - Juniper vSRX: manual/kinds/vr-vsrx.md
           - Cisco XRd: manual/kinds/xrd.md
           - Cisco XRv9k: manual/kinds/vr-xrv9k.md
           - Cisco XRv: manual/kinds/vr-xrv.md
@@ -23,6 +24,7 @@ nav:
           - Cisco Nexus 9000v: manual/kinds/vr-n9kv.md
           - Cisco 8000: manual/kinds/c8000.md
           - Cumulus VX: manual/kinds/cvx.md
+          - Aruba AOS-CX: manual/kinds/vr-aoscx.md
           - SONiC: manual/kinds/sonic-vs.md
           - Dell FTOS10v: manual/kinds/vr-ftosv.md
           - MikroTik RouterOS: manual/kinds/vr-ros.md
@@ -35,6 +37,7 @@ nav:
           - RARE/freeRtr: manual/kinds/rare-freertr.md
           - Openvswitch bridge: manual/kinds/ovs-bridge.md
           - External container: manual/kinds/ext-container.md
+          - Host: manual/kinds/host.md
       - Configuration artifacts: manual/conf-artifacts.md
       - Network wiring concepts: manual/network.md
       - Packet capture & Wireshark: manual/wireshark.md
@@ -64,6 +67,9 @@ nav:
               - ca:
                   - create: cmd/tools/cert/ca/create.md
               - sign: cmd/tools/cert/sign.md
+          - netem:
+              - set: cmd/tools/netem/set.md
+              - show: cmd/tools/netem/show.md
       - completions: cmd/completion.md
   - Lab examples:
       - About: lab-examples/lab-examples.md
@@ -77,7 +83,7 @@ nav:
       - Nokia SR Linux and SONiC: lab-examples/srl-sonic.md
       - External bridge capability: lab-examples/ext-bridge.md
       - WAN topology: lab-examples/wan.md
-      - IXP (Internet eXchange Point) lab: lab-examples/ixp-lab.md
+      - Peering lab: lab-examples/peering-lab.md
       - Nokia SR Linux and Nokia SR OS: lab-examples/vr-sros.md
       - Nokia SR Linux and Juniper vMX: lab-examples/vr-vmx.md
       - Nokia SR Linux and Cisco XRd: lab-examples/srl-xrd.md
@@ -95,6 +101,10 @@ nav:
           - 5-stage Clos topology: lab-examples/templated02.md
       - RARE/freeRtr: lab-examples/rare-freertr.md
   - Release notes:
+      - "0.43": rn/0.43.md
+      - "0.42": rn/0.42.md
+      - "0.41": rn/0.41.md
+      - "0.40": rn/0.40.md
       - "0.39": rn/0.39.md
       - "0.38": rn/0.38.md
       - "0.37": rn/0.37.md
@@ -199,6 +209,7 @@ plugins:
   - redirects:
       redirect_maps:
         lab-examples/tls-cert.md: https://clabs.netdevops.me/security/gnmitls/
+        lab-examples/ixp-lab.md: lab-examples/peering-lab.md
   - typeset
   - glightbox
 
@@ -253,7 +264,11 @@ markdown_extensions:
       fractions: false
   - pymdownx.snippets:
       check_paths: true
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.tasklist:

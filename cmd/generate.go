@@ -28,6 +28,7 @@ var interfaceFormat = map[string]string{
 	"bridge":   "veth%d",
 	"vr-sros":  "eth%d",
 	"vr-vmx":   "eth%d",
+	"vr-vsrx":  "eth%d",
 	"vr-vqfx":  "eth%d",
 	"vr-xrv9k": "eth%d",
 	"vr-veos":  "eth%d",
@@ -37,7 +38,7 @@ var interfaceFormat = map[string]string{
 
 var supportedKinds = []string{
 	"srl", "ceos", "linux", "bridge", "sonic-vs", "crpd", "vr-sros",
-	"vr-vmx", "vr-vqfx", "vr-xrv9k", "vr-veos", "xrd", "rare",
+	"vr-vmx", "vr-vsrx", "vr-vqfx", "vr-xrv9k", "vr-veos", "xrd", "rare",
 }
 
 const (
@@ -213,12 +214,16 @@ func generateTopologyConfig(name, network, ipv4range, ipv6range string,
 						Type:  nodes[i+1].typ,
 					}
 				}
-				config.Topology.Links = append(config.Topology.Links, &types.LinkConfig{
-					Endpoints: []string{
-						node1 + ":" + fmt.Sprintf(interfaceFormat[nodes[i].kind], k+1+interfaceOffset),
-						node2 + ":" + fmt.Sprintf(interfaceFormat[nodes[i+1].kind], j+1),
-					},
-				})
+				config.Topology.Links = append(config.Topology.Links,
+					&types.LinkDefinition{
+						// Type: string(types.LinkTypeBrief),
+						LinkConfig: types.LinkConfig{
+							Endpoints: []string{
+								node1 + ":" + fmt.Sprintf(interfaceFormat[nodes[i].kind], k+1+interfaceOffset),
+								node2 + ":" + fmt.Sprintf(interfaceFormat[nodes[i+1].kind], j+1),
+							},
+						},
+					})
 			}
 		}
 	}

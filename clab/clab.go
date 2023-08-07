@@ -15,7 +15,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/cert"
-	"github.com/srl-labs/containerlab/cert/cfssl"
+	"github.com/srl-labs/containerlab/clab/dependency_manager"
 	errs "github.com/srl-labs/containerlab/errors"
 	"github.com/srl-labs/containerlab/nodes"
 	"github.com/srl-labs/containerlab/runtime"
@@ -24,6 +24,7 @@ import (
 	"github.com/srl-labs/containerlab/runtime/ignite"
 	"github.com/srl-labs/containerlab/types"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sync/semaphore"
 )
 
 type CLab struct {
@@ -61,38 +62,49 @@ func WithDebug(debug bool) ClabOption {
 	}
 }
 
+// WithRuntime option sets a container runtime to be used by containerlab.
 func WithRuntime(name string, rtconfig *runtime.RuntimeConfig) ClabOption {
 	return func(c *CLab) error {
-		// define runtime name.
-		// order of preference: cli flag -> env var -> default value of docker
-		envN := os.Getenv("CLAB_RUNTIME")
-		log.Debugf("env runtime var value is %v", envN)
-		switch {
-		case name != "":
-		case envN != "":
-			name = envN
-		default:
-			name = docker.RuntimeName
+		name, rInit, err := RuntimeInitializer(name)
+		if err != nil {
+			return err
 		}
+
 		c.globalRuntime = name
 
-		if rInit, ok := runtime.ContainerRuntimes[name]; ok {
-			r := rInit()
-			log.Debugf("Running runtime.Init with params %+v and %+v", rtconfig, c.Config.Mgmt)
-			err := r.Init(
-				runtime.WithConfig(rtconfig),
-				runtime.WithMgmtNet(c.Config.Mgmt),
-			)
-			if err != nil {
-				return fmt.Errorf("failed to init the container runtime: %v", err)
-			}
-
-			c.Runtimes[name] = r
-			log.Debugf("initialized a runtime with params %+v", r)
-			return nil
+		r := rInit()
+		log.Debugf("Running runtime.Init with params %+v and %+v", rtconfig, c.Config.Mgmt)
+		err = r.Init(
+			runtime.WithConfig(rtconfig),
+			runtime.WithMgmtNet(c.Config.Mgmt),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to init the container runtime: %v", err)
 		}
-		return fmt.Errorf("unknown container runtime %q", name)
+
+		c.Runtimes[name] = r
+		log.Debugf("initialized a runtime with params %+v", r)
+		return nil
 	}
+}
+
+// RuntimeInitializer returns a runtime initializer function for a provided runtime name.
+func RuntimeInitializer(name string) (string, runtime.Initializer, error) {
+	// define runtime name.
+	// order of preference: cli flag -> env var -> default value of docker
+	envN := os.Getenv("CLAB_RUNTIME")
+	log.Debugf("env runtime var value is %v", envN)
+	switch {
+	case name != "":
+	case envN != "":
+		name = envN
+	default:
+		name = docker.RuntimeName
+	}
+	if rInit, ok := runtime.ContainerRuntimes[name]; ok {
+		return name, rInit, nil
+	}
+	return name, nil, fmt.Errorf("unknown container runtime %q", name)
 }
 
 func WithKeepMgmtNet() ClabOption {
@@ -140,9 +152,6 @@ func filterClabNodes(c *CLab, nodeFilter []string) error {
 
 	log.Infof("Applying node filter: %q", nodeFilter)
 
-	// newNodes := make(map[string]*types.NodeDefinition, len(c.Config.Topology.Nodes))
-	newLinks := make([]*types.LinkConfig, 0, len(c.Config.Topology.Links))
-
 	// filter nodes
 	for name := range c.Config.Topology.Nodes {
 		if exists := slices.Contains(nodeFilter, name); !exists {
@@ -152,35 +161,15 @@ func filterClabNodes(c *CLab, nodeFilter []string) error {
 	}
 
 	// filter links
-	for _, l := range c.Config.Topology.Links {
-		// get the endpoints of the link and extract the node names
-		// to remove the links which have either side in the node filter
-		splitEpAside := strings.Split(l.Endpoints[0], ":")
-		if len(splitEpAside) != 2 {
-			continue
-		}
-
-		epA := splitEpAside[0]
-
-		splitEpBside := strings.Split(l.Endpoints[1], ":")
-		if len(splitEpBside) != 2 {
-			continue
-		}
-
-		epB := splitEpBside[0]
-
-		containsAside := slices.Contains(nodeFilter, epA)
-		containsBside := slices.Contains(nodeFilter, epB)
-
-		// if both endpoints of a link belong to the node filter, keep the link
-		if containsAside && containsBside {
-			log.Debugf("Including link %+v", l)
-			newLinks = append(newLinks, l)
+	for id, l := range c.Links {
+		for _, nodeName := range []string{l.A.Node.ShortName, l.B.Node.ShortName} {
+			// if both endpoints of a link belong to the node filter, keep the link
+			if !slices.Contains(nodeFilter, nodeName) {
+				delete(c.Links, id)
+				break
+			}
 		}
 	}
-	// replace the original collection of links with the links that have both endpoints in the node filter
-	c.Config.Topology.Links = newLinks
-
 	return nil
 }
 
@@ -217,7 +206,7 @@ func NewContainerLab(opts ...ClabOption) (*CLab, error) {
 
 		// init the Cert storage and CA
 		c.Cert.CertStorage = cert.NewLocalDirCertStorage(c.TopoPaths)
-		c.Cert.CA = cfssl.NewCA(c.Config.Debug)
+		c.Cert.CA = cert.NewCA()
 	}
 	return c, err
 }
@@ -251,9 +240,9 @@ func (c *CLab) GlobalRuntime() runtime.ContainerRuntime {
 
 // CreateNodes schedules nodes creation and returns a waitgroup for all nodes.
 // Nodes interdependencies are created in this function.
-func (c *CLab) CreateNodes(ctx context.Context, maxWorkers uint) (*sync.WaitGroup, error) {
-	dm := NewDependencyManager()
-
+func (c *CLab) CreateNodes(ctx context.Context, maxWorkers uint,
+	dm dependency_manager.DependencyManager,
+) (*sync.WaitGroup, error) {
 	for nodeName := range c.Nodes {
 		dm.AddNode(nodeName)
 	}
@@ -294,7 +283,7 @@ func (c *CLab) CreateNodes(ctx context.Context, maxWorkers uint) (*sync.WaitGrou
 }
 
 // create a set of dependencies, that makes the ignite nodes start one after the other.
-func createIgniteSerialDependency(nodeMap map[string]nodes.Node, dm DependencyManager) error {
+func createIgniteSerialDependency(nodeMap map[string]nodes.Node, dm dependency_manager.DependencyManager) error {
 	var prevIgniteNode nodes.Node
 	// iterate through the nodes
 	for _, n := range nodeMap {
@@ -318,7 +307,7 @@ func createIgniteSerialDependency(nodeMap map[string]nodes.Node, dm DependencyMa
 //	network-mode: container:node_b
 //
 // then node_a depends on node_b, and waits for node_b to be scheduled first.
-func createNamespaceSharingDependency(nodeMap map[string]nodes.Node, dm DependencyManager) {
+func createNamespaceSharingDependency(nodeMap map[string]nodes.Node, dm dependency_manager.DependencyManager) {
 	for nodeName, n := range nodeMap {
 		nodeConfig := n.Config()
 		netModeArr := strings.SplitN(nodeConfig.NetworkMode, ":", 2)
@@ -342,7 +331,7 @@ func createNamespaceSharingDependency(nodeMap map[string]nodes.Node, dm Dependen
 
 // createStaticDynamicDependency creates the dependencies between the nodes such that all nodes with dynamic mgmt IP
 // are dependent on the nodes with static mgmt IP. This results in nodes with static mgmt IP to be scheduled before dynamic ones.
-func createStaticDynamicDependency(n map[string]nodes.Node, dm DependencyManager) error {
+func createStaticDynamicDependency(n map[string]nodes.Node, dm dependency_manager.DependencyManager) error {
 	staticIPNodes := make(map[string]nodes.Node)
 	dynIPNodes := make(map[string]nodes.Node)
 
@@ -369,7 +358,7 @@ func createStaticDynamicDependency(n map[string]nodes.Node, dm DependencyManager
 }
 
 // createWaitForDependency reflects the dependencies defined in the configuration via the wait-for field.
-func createWaitForDependency(n map[string]nodes.Node, dm DependencyManager) error {
+func createWaitForDependency(n map[string]nodes.Node, dm dependency_manager.DependencyManager) error {
 	for waiterNode, node := range n {
 		// add node's waitFor nodes to the dependency manager
 		for _, waitForNode := range node.Config().WaitFor {
@@ -384,11 +373,13 @@ func createWaitForDependency(n map[string]nodes.Node, dm DependencyManager) erro
 }
 
 func (c *CLab) scheduleNodes(ctx context.Context, maxWorkers int,
-	scheduledNodes map[string]nodes.Node, dm DependencyManager,
+	scheduledNodes map[string]nodes.Node, dm dependency_manager.DependencyManager,
 ) *sync.WaitGroup {
 	concurrentChan := make(chan nodes.Node)
 
-	workerFunc := func(i int, input chan nodes.Node, wg *sync.WaitGroup, dm DependencyManager) {
+	workerFunc := func(i int, input chan nodes.Node, wg *sync.WaitGroup,
+		dm dependency_manager.DependencyManager,
+	) {
 		defer wg.Done()
 		for {
 			select {
@@ -399,7 +390,7 @@ func (c *CLab) scheduleNodes(ctx context.Context, maxWorkers int,
 				}
 				log.Debugf("Worker %d received node: %+v", i, node.Config())
 
-				// Apply any startup delay
+				// Apply startup delay
 				delay := node.Config().StartupDelay
 				if delay > 0 {
 					log.Infof("node %q is being delayed for %d seconds", node.Config().ShortName, delay)
@@ -412,6 +403,7 @@ func (c *CLab) scheduleNodes(ctx context.Context, maxWorkers int,
 					&nodes.PreDeployParams{
 						Cert:         c.Cert,
 						TopologyName: c.Config.Name,
+						TopoPaths:    c.TopoPaths,
 					},
 				)
 				if err != nil {
@@ -425,15 +417,9 @@ func (c *CLab) scheduleNodes(ctx context.Context, maxWorkers int,
 					continue
 				}
 
-				// set deployment status of a node to created to indicate that it finished creating
-				// this status is checked during link creation to only schedule link creation if both nodes are ready
-				c.m.Lock()
-				node.Config().DeploymentStatus = "created"
-				c.m.Unlock()
+				// signal to dependency manager that this node is done with creation
+				dm.SignalDone(node.Config().ShortName, dependency_manager.NodeStateCreated)
 
-				// signal to dependency manager that this node is done
-
-				dm.SignalDone(node.Config().ShortName)
 			case <-ctx.Done():
 				return
 			}
@@ -457,30 +443,34 @@ func (c *CLab) scheduleNodes(ctx context.Context, maxWorkers int,
 	// Waitgroup used to protect the channel towards the workers of being closed to early
 	workerFuncChWG := new(sync.WaitGroup)
 
-	for _, n := range scheduledNodes {
-		workerFuncChWG.Add(1)
-		// start a func for all the containers, then will wait for their own waitgroups
-		// to be set to zero by their depending containers, then enqueue to the creation channel
-		go func(node nodes.Node, dm DependencyManager, workerChan chan<- nodes.Node, wfcwg *sync.WaitGroup) {
-			// wait for all the nodes that node depends on
-			err := dm.WaitForNodeDependencies(node.Config().ShortName)
-			if err != nil {
-				log.Error(err)
-			}
-			// wait for possible external dependencies
-			c.WaitForExternalNodeDependencies(ctx, node.Config().ShortName)
-			// when all nodes that this node depends on are created, push it into the channel
-			workerChan <- node
-			// indicate we are done, such that only when all of these functions are done, the workerChan is being closed
-			wfcwg.Done()
-		}(n, dm, concurrentChan, workerFuncChWG) // execute this function straight away
-	}
+	// schedule nodes via a go func to create links in parallel
+	go func() {
+		for _, n := range scheduledNodes {
+			workerFuncChWG.Add(1)
+			// start a func for all the containers, then will wait for their own waitgroups
+			// to be set to zero by their depending containers, then enqueue to the creation channel
+			go func(node nodes.Node, dm dependency_manager.DependencyManager,
+				workerChan chan<- nodes.Node, wfcwg *sync.WaitGroup,
+			) {
+				// wait for all the nodes that node depends on
+				err := dm.WaitForNodeDependencies(node.Config().ShortName)
+				if err != nil {
+					log.Error(err)
+				}
+				// wait for possible external dependencies
+				c.WaitForExternalNodeDependencies(ctx, node.Config().ShortName)
+				// when all nodes that this node depends on are created, push it into the channel
+				workerChan <- node
+				// indicate we are done, such that only when all of these functions are done, the workerChan is being closed
+				wfcwg.Done()
+			}(n, dm, concurrentChan, workerFuncChWG) // execute this function straight away
+		}
 
-	// Gate to make sure the channel is not closed before all the nodes made it though the channel
-	workerFuncChWG.Wait()
-	// close the channel and thereby terminate the workerFuncs
-	close(concurrentChan)
-
+		// Gate to make sure the channel is not closed before all the nodes made it though the channel
+		workerFuncChWG.Wait()
+		// close the channel and thereby terminate the workerFuncs
+		close(concurrentChan)
+	}()
 	return wg
 }
 
@@ -511,60 +501,44 @@ func (c *CLab) WaitForExternalNodeDependencies(ctx context.Context, nodeName str
 }
 
 // CreateLinks creates links using the specified number of workers.
-func (c *CLab) CreateLinks(ctx context.Context, workers uint) {
+func (c *CLab) CreateLinks(ctx context.Context, workers uint, dm dependency_manager.DependencyManager) {
 	wg := new(sync.WaitGroup)
-	wg.Add(int(workers))
-	linksChan := make(chan *types.Link)
+	sem := semaphore.NewWeighted(int64(workers))
 
-	log.Debug("creating links...")
-	// wire the links between the nodes based on cabling plan
-	for i := uint(0); i < workers; i++ {
-		go func(i uint) {
+	for _, link := range c.Links {
+		wg.Add(1)
+		go func(li *types.Link) {
 			defer wg.Done()
-			for {
-				select {
-				case link := <-linksChan:
-					if link == nil {
-						log.Debugf("Link worker %d terminating...", i)
-						return
-					}
-					log.Debugf("Link worker %d received link: %+v", i, link)
-					if err := c.CreateVirtualWiring(link); err != nil {
-						log.Error(err)
-					}
-				case <-ctx.Done():
-					return
+
+			var waitNodes []string
+			for _, n := range []*types.NodeConfig{li.A.Node, li.B.Node} {
+				// we should not wait for "host", "mgmt-net" and "macvlan" fake nodes
+				// as they are never managed by dependency manager (never really get created)
+				if n.Kind == "host" || n.ShortName == "mgmt-net" || n.Kind == "macvlan" {
+					continue
 				}
+				waitNodes = append(waitNodes, n.ShortName)
 			}
-		}(i)
-	}
 
-	// create a copy of links map to loop over
-	// so that we can wait till all the nodes are ready before scheduling a link
-	linksCopy := map[int]*types.Link{}
-	for k, v := range c.Links {
-		linksCopy[k] = v
-	}
-	for {
-		if len(linksCopy) == 0 {
-			break
-		}
-		for k, link := range linksCopy {
-			c.m.Lock()
-			if link.A.Node.DeploymentStatus == "created" &&
-				link.B.Node.DeploymentStatus == "created" {
-				linksChan <- link
-				delete(linksCopy, k)
+			err := dm.WaitForNodes(waitNodes, dependency_manager.NodeStateCreated)
+			if err != nil {
+				log.Error(err)
 			}
-			c.m.Unlock()
-		}
 
-		// prevent clab from throttle CPU when nodes take considerable time to start
-		time.Sleep(500 * time.Millisecond)
+			// acquire Sem
+			err = sem.Acquire(ctx, 1)
+			if err != nil {
+				log.Error(err)
+			}
+			defer sem.Release(1)
+			// create the wiring
+			err = c.CreateVirtualWiring(li)
+			if err != nil {
+				log.Error(err)
+			}
+		}(link)
 	}
 
-	// close channel to terminate the workers
-	close(linksChan)
 	// wait for all workers to finish
 	wg.Wait()
 }

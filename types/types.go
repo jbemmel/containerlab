@@ -12,6 +12,7 @@ import (
 	"github.com/docker/go-connections/nat"
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/utils"
+	"gopkg.in/yaml.v2"
 )
 
 // Link is a struct that contains the information of a link between 2 containers.
@@ -37,17 +38,60 @@ type Endpoint struct {
 	MAC string
 }
 
+// String returns a string representation of the endpoint.
+func (e *Endpoint) String() string {
+	return fmt.Sprintf("%s:%s", e.Node.ShortName, e.EndpointName)
+}
+
 // MgmtNet struct defines the management network options.
 type MgmtNet struct {
 	Network string `yaml:"network,omitempty" json:"network,omitempty"` // container runtime network name
 	Bridge  string `yaml:"bridge,omitempty" json:"bridge,omitempty"`
 	// linux bridge backing the runtime network
-	IPv4Subnet     string `yaml:"ipv4_subnet,omitempty" json:"ipv4-subnet,omitempty"`
+	IPv4Subnet     string `yaml:"ipv4-subnet,omitempty" json:"ipv4-subnet,omitempty"`
 	IPv4Gw         string `yaml:"ipv4-gw,omitempty" json:"ipv4-gw,omitempty"`
-	IPv6Subnet     string `yaml:"ipv6_subnet,omitempty" json:"ipv6-subnet,omitempty"`
+	IPv4Range      string `yaml:"ipv4-range,omitempty" json:"ipv4-range,omitempty"`
+	IPv6Subnet     string `yaml:"ipv6-subnet,omitempty" json:"ipv6-subnet,omitempty"`
 	IPv6Gw         string `yaml:"ipv6-gw,omitempty" json:"ipv6-gw,omitempty"`
+	IPv6Range      string `yaml:"ipv6-range,omitempty" json:"ipv6-range,omitempty"`
 	MTU            string `yaml:"mtu,omitempty" json:"mtu,omitempty"`
 	ExternalAccess *bool  `yaml:"external-access,omitempty" json:"external-access,omitempty"`
+}
+
+// Interface compliance.
+var _ yaml.Unmarshaler = &MgmtNet{}
+
+// UnmarshalYAML is a custom unmarshaller for MgmtNet that allows to map old attributes to new ones.
+func (m *MgmtNet) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// define an alias type to avoid recursion during unmarshalling
+	type MgmtNetAlias MgmtNet
+
+	type MgmtNetWithDeprecatedFields struct {
+		MgmtNetAlias         `yaml:",inline"`
+		DeprecatedIPv4Subnet string `yaml:"ipv4_subnet,omitempty" json:"ipv4_subnet,omitempty"`
+		DeprecatedIPv6Subnet string `yaml:"ipv6_subnet,omitempty" json:"ipv6_subnet,omitempty"`
+	}
+	mn := &MgmtNetWithDeprecatedFields{}
+
+	mn.MgmtNetAlias = (MgmtNetAlias)(*m)
+	if err := unmarshal(mn); err != nil {
+		return err
+	}
+
+	// process deprecated fields and use their values for new fields if new fields are not set
+	if len(mn.DeprecatedIPv4Subnet) > 0 && len(mn.IPv4Subnet) == 0 {
+		log.Warnf("Attribute \"ipv4_subnet\" is deprecated and will be removed in the future. Change it to \"ipv4-subnet\"")
+		mn.IPv4Subnet = mn.DeprecatedIPv4Subnet
+	}
+	// map old to new if old defined but new not
+	if len(mn.DeprecatedIPv6Subnet) > 0 && len(mn.IPv6Subnet) == 0 {
+		log.Warnf("Attribute \"ipv6_subnet\" is deprecated and will be removed in the future. Change it to \"ipv6-subnet\"")
+		mn.IPv6Subnet = mn.DeprecatedIPv6Subnet
+	}
+
+	*m = (MgmtNet)(mn.MgmtNetAlias)
+
+	return nil
 }
 
 // NodeConfig is a struct that contains the information of a container element.
@@ -91,6 +135,8 @@ type NodeConfig struct {
 	Binds []string `json:"binds,omitempty"`
 	// PortBindings define the bindings between the container ports and host ports
 	PortBindings nat.PortMap `json:"portbindings,omitempty"`
+	// ResultingPortBindings is a list of port bindings that are actually applied to the container
+	ResultingPortBindings []*GenericPortBinding `json:"port-bindings,omitempty"`
 	// PortSet define the ports that should be exposed on a container
 	PortSet nat.PortSet `json:"portset,omitempty"`
 	// NetworkMode defines container networking mode.
@@ -133,8 +179,6 @@ type NodeConfig struct {
 	CPUSet string  `json:"cpuset,omitempty"`
 	Memory string  `json:"memory,omitempty"`
 
-	// status that is set by containerlab to indicate deployment stage
-	DeploymentStatus string `json:"deployment-status,omitempty"`
 	// Extra node parameters
 	Extras               *Extras    `json:"extras,omitempty"`
 	WaitFor              []string   `json:"wait-for,omitempty"`
@@ -179,7 +223,7 @@ type GenericFilter struct {
 // For each label=value input label, a filter with the Field matching the label and Match matching the value is created.
 // For each standalone label, a filter with Operator=exists and Field matching the label is created.
 func FilterFromLabelStrings(labels []string) []*GenericFilter {
-	gfl := []*GenericFilter{}
+	var gfl []*GenericFilter
 	var gf *GenericFilter
 	for _, s := range labels {
 		gf = &GenericFilter{
@@ -226,16 +270,36 @@ type Extras struct {
 
 // ContainerDetails contains information that is commonly outputted to tables or graphs.
 type ContainerDetails struct {
-	LabName     string `json:"lab_name,omitempty"`
-	LabPath     string `json:"labPath,omitempty"`
-	Name        string `json:"name,omitempty"`
-	ContainerID string `json:"container_id,omitempty"`
-	Image       string `json:"image,omitempty"`
-	Kind        string `json:"kind,omitempty"`
-	Group       string `json:"group,omitempty"`
-	State       string `json:"state,omitempty"`
-	IPv4Address string `json:"ipv4_address,omitempty"`
-	IPv6Address string `json:"ipv6_address,omitempty"`
+	LabName     string                `json:"lab_name,omitempty"`
+	LabPath     string                `json:"labPath,omitempty"`
+	Name        string                `json:"name,omitempty"`
+	ContainerID string                `json:"container_id,omitempty"`
+	Image       string                `json:"image,omitempty"`
+	Kind        string                `json:"kind,omitempty"`
+	Group       string                `json:"group,omitempty"`
+	State       string                `json:"state,omitempty"`
+	IPv4Address string                `json:"ipv4_address,omitempty"`
+	IPv6Address string                `json:"ipv6_address,omitempty"`
+	Ports       []*GenericPortBinding `json:"ports,omitempty"`
+}
+
+// GenericPortBinding represents a port binding.
+type GenericPortBinding struct {
+	HostIP        string `json:"host_ip,omitempty"`
+	HostPort      int    `json:"host_port,omitempty"`
+	ContainerPort int    `json:"port,omitempty"`
+	Protocol      string `json:"protocol,omitempty"`
+}
+
+func (p *GenericPortBinding) String() string {
+	var result string
+	if strings.Contains(p.HostIP, ":") {
+		result = fmt.Sprintf("[%s]", p.HostIP)
+	} else {
+		result = p.HostIP
+	}
+	result += fmt.Sprintf(":%d/%s -> %d", p.HostPort, p.Protocol, p.ContainerPort)
+	return result
 }
 
 type LabData struct {

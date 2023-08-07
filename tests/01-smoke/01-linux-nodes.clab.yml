@@ -20,13 +20,15 @@ topology:
         - cat /etc/os-release
       cpu: 1.5
       memory: 1G
+      mgmt_ipv4: 172.20.20.99 # test deprecated mgmt_ipv4 still works
+      mgmt_ipv6: 2001:172:20:20::99 # test deprecated mgmt_ipv6 still works
     l2:
       kind: linux
       image: nginx:stable-alpine
       ports:
         - 56180:80
-      mgmt_ipv4: 172.20.20.100
-      mgmt_ipv6: 2001:172:20:20::100
+      mgmt-ipv4: 172.20.20.100
+      mgmt-ipv6: 2001:172:20:20::100
       dns:
         servers:
           - 8.8.8.8

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/pmorjan/kmod"
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/labels"
 	"github.com/srl-labs/containerlab/nodes"
@@ -243,7 +244,10 @@ func (c *CLab) createNodeCfg(nodeName string, nodeDef *types.NodeDefinition, idx
 	nodeCfg.License = utils.ResolvePath(p, c.TopoPaths.TopologyFileDir())
 
 	// initialize bind mounts
-	binds := c.Config.Topology.GetNodeBinds(nodeName)
+	binds, err := c.Config.Topology.GetNodeBinds(nodeName)
+	if err != nil {
+		return nil, err
+	}
 	err = c.resolveBindPaths(binds, nodeCfg.LabDir)
 	if err != nil {
 		return nil, err
@@ -287,7 +291,8 @@ func (c *CLab) processStartupConfig(nodeCfg *types.NodeConfig) error {
 			log.Debugf("Node %q startup-config is an embedded config: %q", nodeCfg.ShortName, p)
 			// for embedded config we create a file with the name embedded.partial.cfg
 			// as embedded configs are meant to be partial configs
-			absDestFile := c.TopoPaths.StartupConfigDownloadFileAbsPath(nodeCfg.ShortName, "embedded.partial.cfg")
+			absDestFile := c.TopoPaths.StartupConfigDownloadFileAbsPath(
+				nodeCfg.ShortName, "embedded.partial.cfg")
 
 			err = utils.CreateFile(absDestFile, p)
 			if err != nil {
@@ -321,8 +326,8 @@ func (c *CLab) processStartupConfig(nodeCfg *types.NodeConfig) error {
 	return nil
 }
 
-// NewLink initializes a new link object.
-func (c *CLab) NewLink(l *types.LinkConfig) *types.Link {
+// NewLink initializes a new link object from the link definition provided via topology file.
+func (c *CLab) NewLink(l *types.LinkDefinition) *types.Link {
 	if len(l.Endpoints) != 2 {
 		log.Fatalf("endpoint %q has wrong syntax, unexpected number of items", l.Endpoints) // skipcq: RVV-A0003
 	}
@@ -369,18 +374,22 @@ func (c *CLab) NewEndpoint(e string) *types.Endpoint {
 	// for which we create an special Node with kind "host"
 	case "host":
 		endpoint.Node = &types.NodeConfig{
-			Kind:             "host",
-			ShortName:        "host",
-			NSPath:           hostNSPath,
-			DeploymentStatus: "created",
+			Kind:      "host",
+			ShortName: "host",
+			NSPath:    hostNSPath,
+		}
+	case "macvlan":
+		endpoint.Node = &types.NodeConfig{
+			Kind:      "macvlan",
+			ShortName: "macvlan",
+			NSPath:    hostNSPath,
 		}
 	// mgmt-net is a special reference to a bridge of the docker network
 	// that is used as the management network
 	case "mgmt-net":
 		endpoint.Node = &types.NodeConfig{
-			Kind:             "bridge",
-			ShortName:        "mgmt-net",
-			DeploymentStatus: "created",
+			Kind:      "bridge",
+			ShortName: "mgmt-net",
 		}
 	default:
 		c.m.Lock()
@@ -401,6 +410,7 @@ func (c *CLab) NewEndpoint(e string) *types.Endpoint {
 }
 
 // CheckTopologyDefinition runs topology checks and returns any errors found.
+// This function runs after topology file is parsed and all nodes/links are initialized.
 func (c *CLab) CheckTopologyDefinition(ctx context.Context) error {
 	var err error
 
@@ -410,7 +420,6 @@ func (c *CLab) CheckTopologyDefinition(ctx context.Context) error {
 			return err
 		}
 	}
-
 	if err = c.verifyLinks(); err != nil {
 		return err
 	}
@@ -429,24 +438,68 @@ func (c *CLab) CheckTopologyDefinition(ctx context.Context) error {
 	return nil
 }
 
+// verifyLinks checks if all the endpoints in the links section of the topology file
+// appear only once.
 func (c *CLab) verifyLinks() error {
 	endpoints := map[string]struct{}{}
 	// dups accumulates duplicate links
 	dups := []string{}
-	for _, lc := range c.Config.Topology.Links {
-		for _, e := range lc.Endpoints {
-			if err := checkEndpoint(e); err != nil {
-				return err
+	for _, l := range c.Links {
+		for _, e := range []*types.Endpoint{l.A, l.B} {
+			e_string := e.String()
+			if _, ok := endpoints[e_string]; ok {
+				// macvlan interface can appear multiple times
+				if strings.Contains(e_string, "macvlan") {
+					continue
+				}
+
+				dups = append(dups, e_string)
 			}
-			if _, ok := endpoints[e]; ok {
-				dups = append(dups, e)
-			}
-			endpoints[e] = struct{}{}
+			endpoints[e_string] = struct{}{}
 		}
 	}
 	if len(dups) != 0 {
+		sort.Strings(dups) // sort for deterministic error message
 		return fmt.Errorf("endpoints %q appeared more than once in the links section of the topology file", dups)
 	}
+	return nil
+}
+
+// LoadKernelModules loads containerlab-required kernel modules.
+func (c *CLab) LoadKernelModules() error {
+	modules := []string{"ip_tables", "ip6_tables"}
+
+	for _, m := range modules {
+		isLoaded, err := utils.IsKernelModuleLoaded(m)
+		if err != nil {
+			return err
+		}
+
+		if isLoaded {
+			log.Debugf("kernel module %q is already loaded", m)
+
+			continue
+		}
+
+		log.Debugf("kernel module %q is not loaded. Trying to load", m)
+		// trying to load the kernel modules.
+		km, err := kmod.New()
+		if err != nil {
+			log.Warnf("Unable to init module loader: %v. Skipping...", err)
+
+			return nil
+		}
+
+		err = km.Load(m, "", 0)
+		if err != nil {
+			log.Warnf("Unable to load kernel module %q automatically %q", m, err)
+
+			return nil
+		}
+
+		log.Debugf("kernel module %q loaded successfully", m)
+	}
+
 	return nil
 }
 
@@ -548,18 +601,6 @@ func (c *CLab) verifyRootNetnsInterfaceUniqueness() error {
 				rootNsIfaces[e.EndpointName] = struct{}{}
 			}
 		}
-	}
-	return nil
-}
-
-// checkEndpoint runs checks on the endpoint syntax.
-func checkEndpoint(e string) error {
-	split := strings.Split(e, ":")
-	if len(split) != 2 {
-		return fmt.Errorf("malformed endpoint definition: %s", e)
-	}
-	if split[1] == "eth0" {
-		return fmt.Errorf("eth0 interface can't be used in the endpoint definition as it is added by docker automatically: '%s'", e)
 	}
 	return nil
 }

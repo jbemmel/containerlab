@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 
@@ -70,7 +72,7 @@ func CopyFile(src, dst string, mode os.FileMode) (err error) {
 	return CopyFileContents(src, dst, mode)
 }
 
-// IsHttpUri check if the url is a downloadable uri
+// IsHttpUri check if the url is a downloadable uri.
 func IsHttpUri(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
@@ -169,12 +171,62 @@ func ReadFileContent(file string) ([]byte, error) {
 }
 
 // ExpandHome expands `~` char in the path to home path of a current user in provided path p.
+// When sudo is used, it expands to home dir of a sudo user.
 func ExpandHome(p string) string {
-	userPath, _ := os.UserHomeDir()
+	// current user home dir, used when sudo is not used
+	// or when errors occur during sudo user lookup
+	curUserHomeDir, _ := os.UserHomeDir()
 
-	p = strings.Replace(p, "~", userPath, 1)
+	userId, isSet := os.LookupEnv("SUDO_UID")
+	if !isSet {
+		log.Debugf("SUDO_UID env var is not set, using current user home dir: %v", curUserHomeDir)
+		p = strings.Replace(p, "~", curUserHomeDir, 1)
+		return p
+	}
+
+	// lookup user to figure out Home Directory
+	u, err := user.LookupId(userId)
+	if err != nil {
+		log.Debugf("error while looking up user by id using os/user.LookupId %v: %v", userId, err)
+		// user.LookupId fails when ActiveDirectory is used, so we try to use getent command
+		homedir := lookupUserHomeDirViaGetent(userId)
+		if homedir != "" {
+			log.Debugf("user home dir %v found using getent command", homedir)
+			p = strings.Replace(p, "~", homedir, 1)
+			return p
+		}
+		// fallback to current user home dir if getent command fails
+		p = strings.Replace(p, "~", curUserHomeDir, 1)
+		return p
+	}
+
+	p = strings.Replace(p, "~", u.HomeDir, 1)
+
+	log.Debugf("user home dir %v found using os/user.LookupId", u.HomeDir)
 
 	return p
+}
+
+// lookupUserHomeDirViaGetent looks up user's homedir by using `getent passwd` command.
+// It is used as a fallback when os/user.LookupId fails, which seems to
+// happen when ActiveDirectory is used.
+func lookupUserHomeDirViaGetent(userId string) string {
+	cmd := exec.Command("getent", "passwd", userId)
+	out, err := cmd.Output()
+	if err != nil {
+		log.Debugf("error while looking up user by id using getent command %v: %v", userId, err)
+		return ""
+	}
+
+	// output format is `username:x:uid:gid:comment:home:shell`
+	// we need to extract home dir
+	parts := strings.Split(string(out), ":")
+	if len(parts) < 6 {
+		log.Debugf("error while looking up user by id using getent command %v: unexpected output format", userId)
+		return ""
+	}
+
+	return parts[5]
 }
 
 // ResolvePath resolves a string path by expanding `~` to home dir

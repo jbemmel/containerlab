@@ -90,6 +90,7 @@ For a topology node named "srl" in a lab named "srl01", the following SANs are s
 - `srl`
 - `clab-srl01-srl`
 - `srl.srl01.io`
+- IPv4/6 addresses of the node
 
 ```yaml
 name: srl01
@@ -256,6 +257,8 @@ topology:
 
 Binds defined on multiple levels (defaults -> kind -> node) will be merged with the duplicated values removed (the lowest level takes precedence).
 
+When a bind with the same destination is defined on multiple levels, the lowest level takes precedence. This allows to override the binds defined on the higher levels.
+
 ### ports
 
 To bind the ports between the lab host and the containers the users can populate the `ports` object inside the node:
@@ -351,10 +354,10 @@ topology:
     entrypoint: entrypoint.sh
   kinds:
     srl:
-      cmd: entrypoint.sh
+      entrypoint: entrypoint.sh
   nodes:
     node1:
-      cmd: entrypoint.sh
+      entrypoint: entrypoint.sh
 ```
 
 ### cmd
@@ -409,9 +412,9 @@ label3: value3 # inherited from kinds section
 !!!note
     Both user-defined and containerlab-assigned labels also promoted to environment variables prefixed with `CLAB_LABEL_` prefix.
 
-### mgmt_ipv4
+### mgmt-ipv4
 
-To make a node to boot with a user-specified management IPv4 address, the `mgmt_ipv4` setting can be used. Note, that the static management IP address should be part of the subnet that is used within the lab.
+To make a node to boot with a user-specified management IPv4 address, the `mgmt-ipv4` setting can be used. Note, that the static management IP address should be part of the subnet that is used within the lab.
 
 Read more about user-defined management addresses [here](network.md#user-defined-addresses).
 
@@ -419,7 +422,7 @@ Read more about user-defined management addresses [here](network.md#user-defined
 nodes:
     r1:
       kind: srl
-      mgmt_ipv4: 172.20.20.100
+      mgmt-ipv4: 172.20.20.100
 ```
 
 ### mgmt_ipv6

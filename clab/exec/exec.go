@@ -101,7 +101,18 @@ func (e *ExecCmd) GetCmdString() string {
 }
 
 func (e *ExecResult) String() string {
-	return fmt.Sprintf("Cmd: %s\nReturnCode: %d\nStdOut:\n%s\nStdErr:\n%s\n", e.GetCmdString(), e.ReturnCode, e.Stdout, e.Stderr)
+	var s strings.Builder
+
+	s.WriteString(fmt.Sprintf("Cmd: %s\nReturnCode: %d", e.GetCmdString(), e.ReturnCode))
+
+	if e.Stdout != "" {
+		s.WriteString(fmt.Sprintf("\nStdout: %q", e.Stdout))
+	}
+	if e.Stderr != "" {
+		s.WriteString(fmt.Sprintf("\nStderr: %q", e.Stderr))
+	}
+
+	return s.String()
 }
 
 // Dump dumps execution result as a string in one of the provided formats.
@@ -228,7 +239,7 @@ func (ec *ExecCollection) Log() {
 	for k, execResults := range ec.execEntries {
 		for _, er := range execResults {
 			switch {
-			case er.GetReturnCode() != 0 || er.GetStdErrString() != "":
+			case er.GetReturnCode() != 0:
 				log.Errorf("Failed to execute command %q on the node %q. rc=%d,\nstdout:\n%s\nstderr:\n%s",
 					er.GetCmdString(), k, er.GetReturnCode(), er.GetStdOutString(), er.GetStdErrString())
 			default:

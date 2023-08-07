@@ -1,9 +1,9 @@
 BIN_DIR = $(CURDIR)/bin
 BINARY = $(CURDIR)/bin/containerlab
-MKDOCS_VER = 9.0.13
+MKDOCS_VER = 9.1.4
 # insiders version/tag https://github.com/srl-labs/mkdocs-material-insiders/pkgs/container/mkdocs-material-insiders
 # make sure to also change the mkdocs version in actions' cicd.yml and force-build.yml files
-MKDOCS_INS_VER = 9.0.13-insiders-4.32.0-hellt
+MKDOCS_INS_VER = 9.1.4-insiders-4.32.4-hellt
 
 DATE := $(shell date)
 COMMIT_HASH := $(shell git rev-parse --short HEAD)
@@ -34,7 +34,7 @@ MOCKDIR = ./mocks
 mocks-gen: mocks-rm ## Generate mocks for all the defined interfaces.
 	go install github.com/golang/mock/mockgen@v1.6.0
 	mockgen -package=mocks -source=nodes/node.go -destination=$(MOCKDIR)/node.go
-	mockgen -package=mocks -source=clab/dependency_manager.go -destination=$(MOCKDIR)/dependency_manager.go
+	mockgen -package=mocks -source=clab/dependency_manager/dependency_manager.go -destination=$(MOCKDIR)/dependency_manager.go
 	mockgen -package=mocks -source=runtime/runtime.go -destination=$(MOCKDIR)/runtime.go
 	mockgen -package=mocks -source=nodes/default_node.go -destination=$(MOCKDIR)/default_node.go
 	mockgen -package=mocks -source=clab/exec/exec.go -destination=$(MOCKDIR)/exec.go
@@ -59,11 +59,13 @@ site:
 
 # serve the site locally using mkdocs-material insiders container
 .PHONY: serve-insiders
-serve-insiders:
+serve-docs:
 	docker run -it --rm -p 8001:8000 -v $(CURDIR):/docs ghcr.io/srl-labs/mkdocs-material-insiders:$(MKDOCS_INS_VER)
 
 # serve the site locally using mkdocs-material insiders container and dirty-reload
-.PHONY: serve-insiders-dirty
+# in this mode navigation might not update properly, but the content will be updated
+# if nav is not updated, re-run the target.
+.PHONY: serve-docs
 serve-insiders-dirty:
 	docker run -it --rm -p 8001:8000 -v $(CURDIR):/docs ghcr.io/srl-labs/mkdocs-material-insiders:$(MKDOCS_INS_VER) serve -a 0.0.0.0:8000 --dirtyreload
 

@@ -163,8 +163,6 @@ func (d *DefaultNode) UpdateConfigWithRuntimeInfo(ctx context.Context) error {
 		return fmt.Errorf("no container runtime information retrieved")
 	}
 
-	// TODO: rdodin: evaluate the necessity of this function, since runtime data may be updated by the runtime
-	// when we do listing of containers and produce the GenericContainer
 	// network settings of a first container only
 	netSettings := cnts[0].NetworkSettings
 
@@ -176,6 +174,8 @@ func (d *DefaultNode) UpdateConfigWithRuntimeInfo(ctx context.Context) error {
 	d.Cfg.MgmtIPv6Gateway = netSettings.IPv6Gw
 
 	d.Cfg.ContainerID = cnts[0].ID
+
+	d.Cfg.ResultingPortBindings = cnts[0].Ports
 
 	return nil
 }
@@ -339,7 +339,8 @@ func (d *DefaultNode) VerifyLicenseFileExists(_ context.Context) error {
 			// license is not required
 			return nil
 		default:
-			return fmt.Errorf("unknown license policy value %s for node %s kind %s", d.LicensePolicy, d.Config().ShortName, d.Cfg.Kind)
+			return fmt.Errorf("unknown license policy value %s for node %s kind %s",
+				d.LicensePolicy, d.Config().ShortName, d.Cfg.Kind)
 		}
 	}
 	// if license is provided check path exists
