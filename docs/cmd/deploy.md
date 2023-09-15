@@ -16,7 +16,11 @@ The `deploy` command spins up a lab using the topology expressed via [topology d
 
 With the global `--topo | -t` flag a user sets the path to the topology definition file that will be used to spin up a lab.
 
-When the topology file flag is omitted, containerlab will try to find the matching file name by looking at the current working directory. If a single file is found, it will be used.
+When the topology path refers to a directory, containerlab will look for a file with `.clab.yml` extension in that directory and use it as a topology definition file.
+
+When the topology file flag is omitted, containerlab will try to find the matching file name by looking at the current working directory.
+
+If more than one file is found for directory-based path or when the flag is omitted entirely, containerlab will fail with an error.
 
 #### name
 
@@ -45,13 +49,12 @@ With `--max-workers` flag, it is possible to limit the number of concurrent work
 
 #### runtime
 
-Containerlab nodes can be started by different runtimes, with `docker` being the default one. Besides that, containerlab has experimental support for `podman`, `containerd`, and `ignite` runtimes.
+Containerlab nodes can be started by different runtimes, with `docker` being the default one. Besides that, containerlab has experimental support for `podman`, and `ignite` runtimes.
 
 A global runtime can be selected with a global `--runtime | -r` flag that will select a runtime to use. The possible value are:
 
 * `docker` - default
-* `podman` - beta support
-* `containerd` - experimental support
+* `podman` - experimental support
 * `ignite`
 
 #### timeout

@@ -5,11 +5,9 @@ go 1.20
 require (
 	github.com/a8m/envsubst v1.4.2
 	github.com/awalterschulze/gographviz v2.0.3+incompatible
-	github.com/containerd/containerd v1.7.3
-	github.com/containernetworking/cni v1.1.2
 	github.com/containernetworking/plugins v1.3.0
-	github.com/containers/common v0.55.2
-	github.com/containers/podman/v4 v4.6.0
+	github.com/containers/common v0.55.4
+	github.com/containers/podman/v4 v4.6.2
 	github.com/digitalocean/go-openvswitch v0.0.0-20201214180534-ce0f183468d8
 	github.com/docker/distribution v2.8.2+incompatible
 	github.com/docker/docker v24.0.5+incompatible
@@ -19,12 +17,12 @@ require (
 	github.com/florianl/go-tc v0.4.2
 	github.com/google/go-cmp v0.5.9
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
-	github.com/google/uuid v1.3.0
+	github.com/google/uuid v1.3.1
 	github.com/h2non/gock v1.2.0
 	github.com/hairyhenderson/gomplate/v3 v3.11.5
 	github.com/hashicorp/go-version v1.6.0
 	github.com/joho/godotenv v1.5.1
-	github.com/jsimonetti/rtnetlink v1.3.4
+	github.com/jsimonetti/rtnetlink v1.3.5
 	github.com/kellerza/template v0.0.6
 	github.com/klauspost/cpuid v1.3.1
 	github.com/mackerelio/go-osstat v0.2.4
@@ -33,16 +31,17 @@ require (
 	github.com/opencontainers/runtime-spec v1.1.0
 	github.com/pkg/errors v0.9.1
 	github.com/pmorjan/kmod v1.1.0
-	github.com/scrapli/scrapligo v1.1.10
+	github.com/scrapli/scrapligo v1.1.12
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.7.0
+	github.com/stretchr/testify v1.8.4
 	github.com/tklauser/numcpus v0.6.1
 	github.com/vishvananda/netlink v1.2.1-beta.2
 	github.com/weaveworks/ignite v0.10.0
-	golang.org/x/crypto v0.12.0
+	golang.org/x/crypto v0.13.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
-	golang.org/x/sys v0.11.0
-	golang.org/x/term v0.11.0
+	golang.org/x/sys v0.12.0
+	golang.org/x/term v0.12.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -54,10 +53,12 @@ require (
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.14.10 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
-	github.com/cilium/ebpf v0.10.0 // indirect
+	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cloudflare/circl v1.3.3 // indirect
 	github.com/container-orchestrated-devices/container-device-interface v0.5.4 // indirect
+	github.com/containerd/containerd v1.7.3 // indirect
 	github.com/containerd/typeurl/v2 v2.1.1 // indirect
+	github.com/containernetworking/cni v1.1.2 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20230514072755-504adb8a8af1 // indirect
 	github.com/go-openapi/analysis v0.21.4 // indirect
 	github.com/go-openapi/errors v0.20.3 // indirect
@@ -83,6 +84,7 @@ require (
 	github.com/moby/sys/sequential v0.5.0 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/pkg/sftp v1.13.5 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sigstore/fulcio v1.3.1 // indirect
 	github.com/sigstore/rekor v1.2.2-0.20230601122533-4c81ff246d12 // indirect
 	github.com/sigstore/sigstore v1.7.1 // indirect
@@ -142,13 +144,13 @@ require (
 	github.com/containerd/go-runc v1.0.0 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3 // indirect
 	github.com/containerd/ttrpc v1.2.2 // indirect
-	github.com/containers/buildah v1.31.0 // indirect
+	github.com/containers/buildah v1.31.2 // indirect
 	github.com/containers/image v3.0.2+incompatible // indirect
-	github.com/containers/image/v5 v5.26.1 // indirect
+	github.com/containers/image/v5 v5.26.2 // indirect
 	github.com/containers/libtrust v0.0.0-20230121012942-c1716e8a8d01 // indirect
 	github.com/containers/ocicrypt v1.1.7 // indirect
 	github.com/containers/psgo v1.8.0 // indirect
-	github.com/containers/storage v1.48.0 // indirect
+	github.com/containers/storage v1.48.1 // indirect
 	github.com/coreos/go-iptables v0.6.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/creack/pty v1.1.18 // indirect
@@ -264,11 +266,11 @@ require (
 	go4.org/intern v0.0.0-20230205224052-192e9f60865c // indirect
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230204201903-c31fa085b70e // indirect
 	gocloud.dev v0.29.0 // indirect
-	golang.org/x/mod v0.10.0 // indirect
-	golang.org/x/net v0.12.0
+	golang.org/x/mod v0.12.0
+	golang.org/x/net v0.14.0
 	golang.org/x/oauth2 v0.9.0 // indirect
-	golang.org/x/sync v0.3.0
-	golang.org/x/text v0.12.0
+	golang.org/x/sync v0.3.0 // indirect
+	golang.org/x/text v0.13.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.9.3 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect

@@ -24,7 +24,7 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
       docs: ${{ steps.filter.outputs.docs }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v2
         id: filter
         with:
@@ -35,6 +35,7 @@ jobs:
               - 'cmd/**'
               - 'tests/**'
               - 'nodes/**'
+              - 'links/**'
               - 'types/**'
               - 'utils/**'
               - 'netconf/**'
@@ -42,6 +43,7 @@ jobs:
               - 'internal/**'
               - 'errors/**'
               - 'cert/**'
+              - 'virt/**'
               - 'border0_api/**'
               - '.github/workflows/cicd.yml'
               - 'go.mod'
@@ -58,8 +60,8 @@ jobs:
     needs: file-changes
     if: needs.file-changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v3
-      - uses: WillAbides/setup-go-faster@v1.9.0
+      - uses: actions/checkout@v4
+      - uses: WillAbides/setup-go-faster@v1.10.1
         with:
           go-version: ${{ env.GOVER }}
 
@@ -77,7 +79,7 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Build containerlab
-        run: make build-with-podman BINARY=containerlab
+        run: make build-with-podman-debug BINARY=containerlab
       # store clab binary as artifact
       - uses: actions/upload-artifact@v3
         with:
@@ -89,8 +91,8 @@ jobs:
     needs: file-changes
     if: needs.file-changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v3
-      - uses: WillAbides/setup-go-faster@v1.9.0
+      - uses: actions/checkout@v4
+      - uses: WillAbides/setup-go-faster@v1.10.1
         with:
           go-version: ${{ env.GOVER }}
 
@@ -104,8 +106,8 @@ jobs:
     needs: file-changes
     if: needs.file-changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v3
-      - uses: WillAbides/setup-go-faster@v1.9.0
+      - uses: actions/checkout@v4
+      - uses: WillAbides/setup-go-faster@v1.10.1
         with:
           go-version: ${{ env.GOVER }}
 
@@ -122,66 +124,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - run: CGO_ENABLED=1 go test -race ./... -coverprofile coverage.out -covermode atomic
+      - run: make test
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-
-  build-podman-v4:
-    env:
-      CGO_ENABLED: 1 # CGO is required for podman
-    runs-on: ubuntu-22.04
-    needs: file-changes
-    if: needs.file-changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Cache podman bin
-        id: cache-podman-bin
-        uses: actions/cache@v3
-        with:
-          path: |
-            ./bin
-          key: ${{ runner.os }}-podman-${{ env.PODMAN_VER }}
-          restore-keys: |
-            ${{ runner.os }}-podman
-
-      - uses: actions/checkout@v3
-        if: steps.cache-podman-bin.outputs.cache-hit != 'true'
-        with:
-          repository: containers/podman
-          ref: ${{ env.PODMAN_VER }}
-
-      - uses: WillAbides/setup-go-faster@v1.9.0
-        if: steps.cache-podman-bin.outputs.cache-hit != 'true'
-        with:
-          go-version: ${{ env.GOVER }}
-
-      - name: Cache go modules
-        if: steps.cache-podman-bin.outputs.cache-hit != 'true'
-        uses: actions/cache@v3
-        with:
-          # In order:
-          # * Module download cache
-          # * Build cache (Linux)
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-podman-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-podman
-
-      - name: Add build packages
-        if: steps.cache-podman-bin.outputs.cache-hit != 'true'
-        run: sudo apt update && sudo apt install -y libsystemd-dev libseccomp-dev pkg-config golang-github-proglottis-gpgme-dev
-
-      - name: Build podman v4
-        if: steps.cache-podman-bin.outputs.cache-hit != 'true'
-        run: make binaries
-
-      # store podman binary as artifact
+      # upload coverage report from unit tests, as they are then
+      # merged with e2e tests coverage
       - uses: actions/upload-artifact@v3
+        if: always()
         with:
-          name: podman-bins
-          path: bin
+          name: coverage
+          path: ./tests/coverage/*
+          retention-days: 7
 
   smoke-tests:
     runs-on: ubuntu-22.04
@@ -190,15 +142,13 @@ jobs:
         runtime:
           - "docker"
           - "podman"
-        # - "containerd"
     needs:
       - unit-test
       - staticcheck
       - build-containerlab
-      - build-podman-v4
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v3
@@ -206,17 +156,15 @@ jobs:
           name: containerlab
       - name: Move containerlab to usr/bin
         run: sudo mv ./containerlab /usr/bin/containerlab && sudo chmod a+x /usr/bin/containerlab
-
-      - name: download podman bin artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: podman-bins
-      - name: Move podman to /usr/bin
-        run: sudo mv ./podman /usr/bin && sudo chmod a+x /usr/bin/podman
-
-      - name: Enable Podman API service
-        run: sudo systemctl start podman
-
+      - name: Setup Podman
+        if: matrix.runtime == 'podman'
+        run: |
+          sudo apt purge -y podman
+          echo 'deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_22.04/ /' | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:unstable.list
+          curl -fsSL https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_22.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/devel_kubic_libcontainers_unstable.gpg > /dev/null
+          sudo apt update
+          sudo apt install -y podman=4:4.6.2-0ubuntu22.04+obs81.2
+          sudo systemctl start podman
       - uses: actions/setup-python@v4
         with:
           python-version: "3.8"
@@ -235,6 +183,15 @@ jobs:
           name: 01-smoke-log
           path: ./tests/out/*.html
 
+      # upload coverage report from unit tests, as they are then
+      # merged with e2e tests coverage
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: coverage
+          path: ./tests/coverage/*
+          retention-days: 7
+
   ext-container-tests:
     runs-on: ubuntu-22.04
     strategy:
@@ -247,7 +204,7 @@ jobs:
       - build-containerlab
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v3
@@ -279,20 +236,28 @@ jobs:
           name: 06-ext-container-log
           path: ./tests/out/*.html
 
+      # upload coverage report from unit tests, as they are then
+      # merged with e2e tests coverage
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: coverage
+          path: ./tests/coverage/*
+          retention-days: 7
+
   ceos-basic-tests:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
         runtime:
           - "docker"
-          # - "containerd"
     needs:
       - unit-test
       - staticcheck
       - build-containerlab
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v3
@@ -326,6 +291,15 @@ jobs:
           name: 03-basic-ceos-log
           path: ./tests/out/*.html
 
+      # upload coverage report from unit tests, as they are then
+      # merged with e2e tests coverage
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: coverage
+          path: ./tests/coverage/*
+          retention-days: 7
+
   srlinux-basic-tests:
     runs-on: ubuntu-22.04
     strategy:
@@ -339,7 +313,7 @@ jobs:
       - build-containerlab
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v3
@@ -348,15 +322,17 @@ jobs:
       - name: Move containerlab to usr/bin
         run: sudo mv ./containerlab /usr/bin/containerlab && sudo chmod a+x /usr/bin/containerlab
 
-      - name: download podman bin artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: podman-bins
-      - name: Move podman to /usr/bin
-        run: sudo mv ./podman /usr/bin && sudo chmod a+x /usr/bin/podman
-
-      - name: Enable Podman API service
-        run: sudo systemctl start podman
+      - name: Setup Podman
+        if: matrix.runtime == 'podman'
+        # check http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_22.04/amd64/
+        # for available podman releases
+        run: |
+          sudo apt purge -y podman
+          echo 'deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_22.04/ /' | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:unstable.list
+          curl -fsSL https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_22.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/devel_kubic_libcontainers_unstable.gpg > /dev/null
+          sudo apt update
+          sudo apt install -y podman=4:4.6.2-0ubuntu22.04+obs81.2
+          sudo systemctl start podman
 
       - uses: actions/setup-python@v4
         with:
@@ -376,6 +352,15 @@ jobs:
           name: 02-basic-srl-log
           path: ./tests/out/*.html
 
+      # upload coverage report from unit tests, as they are then
+      # merged with e2e tests coverage
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: coverage
+          path: ./tests/coverage/*
+          retention-days: 7
+
   ixiac-one-basic-tests:
     runs-on: ubuntu-22.04
     strategy:
@@ -388,7 +373,7 @@ jobs:
       - build-containerlab
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v3
@@ -414,12 +399,48 @@ jobs:
           name: 04-basic-ixiacone-log
           path: ./tests/out/*.html
 
+      # upload coverage report from unit tests, as they are then
+      # merged with e2e tests coverage
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: coverage
+          path: ./tests/coverage/*
+          retention-days: 7
+
+    # create a job that downloads coverage artifact and uses codecov to upload it
+  coverage:
+    runs-on: ubuntu-22.04
+    needs:
+      - unit-test
+      - smoke-tests
+      - ext-container-tests
+      - ceos-basic-tests
+      - srlinux-basic-tests
+      - ixiac-one-basic-tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: WillAbides/setup-go-faster@v1.10.1
+        with:
+          go-version: ${{ env.GOVER }}
+      - uses: actions/download-artifact@v3
+        with:
+          name: coverage
+          path: tests/coverage
+      - name: convert Go's binary coverage to text coverage
+        run: make convert-coverage
+      - name: Upload coverage to codecov
+        uses: codecov/codecov-action@v3
+
   docs-test:
     runs-on: ubuntu-22.04
     needs: file-changes
     if: needs.file-changes.outputs.docs == 'true' || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/docs-publish'
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
@@ -459,12 +480,12 @@ jobs:
       - ext-container-tests
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: WillAbides/setup-go-faster@v1.9.0
+        uses: WillAbides/setup-go-faster@v1.10.1
         with:
           go-version: ${{ env.GOVER }}
 
@@ -503,7 +524,7 @@ jobs:
     needs: build-and-release
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -525,7 +546,7 @@ jobs:
     needs: docs-test
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 

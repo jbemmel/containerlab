@@ -21,9 +21,12 @@ import (
 	"github.com/hairyhenderson/gomplate/v3/data"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/mod/semver"
 
 	"github.com/srl-labs/containerlab/cert"
 	"github.com/srl-labs/containerlab/clab/exec"
+	"github.com/srl-labs/containerlab/links"
 	"github.com/srl-labs/containerlab/nodes"
 	"github.com/srl-labs/containerlab/types"
 	"github.com/srl-labs/containerlab/utils"
@@ -55,16 +58,23 @@ set / system snmp network-instance mgmt
 set / system snmp network-instance mgmt admin-state enable
 set / system lldp admin-state enable
 set / system aaa authentication idle-timeout 7200
-{{/* enabling interfaces referenced as endpoints for a node (both e1-2 and e1-3-1 notations) */}}
-{{- range $ep := .Endpoints }}
-{{- if eq $ep.EndpointName "mgmt0" }}{{- continue }}{{- end}}
-{{- $parts := ($ep.EndpointName | strings.ReplaceAll "e" "" | strings.Split "-") -}}
-set / interface ethernet-{{index $parts 0}}/{{index $parts 1}} admin-state enable
-  {{- if eq (len $parts) 3 }}
-set / interface ethernet-{{index $parts 0}}/{{index $parts 1}} breakout-mode num-channels 4 channel-speed 25G
-set / interface ethernet-{{index $parts 0}}/{{index $parts 1}}/{{index $parts 2}} admin-state enable
+{{- /* enabling interfaces referenced as endpoints for a node (both e1-2 and e1-3-1 notations) */}}
+{{- range $epName, $ep := .IFaces }}
+set / interface ethernet-{{ $ep.Slot }}/{{ $ep.Port }} admin-state enable
+  {{- if ne $ep.Mtu 0 }}
+set / interface ethernet-{{ $ep.Slot }}/{{ $ep.Port }} mtu {{ $ep.Mtu }}
   {{- end }}
+
+  {{- if ne $ep.BreakoutNo  "" }}
+set / interface ethernet-{{ $ep.Slot }}/{{ $ep.Port }} breakout-mode num-channels 4 channel-speed 25G
+set / interface ethernet-{{ $ep.Slot }}/{{ $ep.Port }}/{{ $ep.BreakoutNo }} admin-state enable
+  {{- end }}
+
 {{ end -}}
+{{- if .SSHPubKeys }}
+set / system aaa authentication linuxadmin-user ssh-key [ {{ .SSHPubKeys }} ]
+set / system aaa authentication admin-user ssh-key [ {{ .SSHPubKeys }} ]
+{{- end }}
 set / system banner login-banner "{{ .Banner }}"
 commit save`
 )
@@ -137,6 +147,10 @@ type srl struct {
 	// to generate certificates
 	cert         *cert.Cert
 	topologyName string
+	// SSH public keys extracted from the clab host
+	sshPubKeys []ssh.PublicKey
+	// software version SR Linux node runs
+	swVersion *SrlVersion
 }
 
 func (s *srl) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
@@ -151,12 +165,8 @@ func (s *srl) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
 
 	s.Cfg = cfg
 
-	// force cert generation for SR Linux nodes
-	if s.Cfg.Certificate == nil {
-		s.Cfg.Certificate = &types.CertificateConfig{
-			Issue: true,
-		}
-	}
+	// force cert creation for srlinux nodes as they by make use of tls certificate in the default config
+	s.Cfg.Certificate.Issue = utils.BoolPointer(true)
 
 	for _, o := range opts {
 		o(s)
@@ -247,6 +257,9 @@ func (s *srl) PreDeploy(_ context.Context, params *nodes.PreDeployParams) error 
 		)
 	}
 
+	// store provided pubkeys
+	s.sshPubKeys = params.SSHPubKeys
+
 	// store the certificate-related parameters
 	// for cert generation to happen in Post-Deploy phase with mgmt IPs as SANs
 	s.cert = params.Cert
@@ -282,6 +295,11 @@ func (s *srl) PostDeploy(ctx context.Context, params *nodes.PostDeployParams) er
 
 	// start waiting for initial commit and mgmt server ready
 	if err := s.Ready(ctx); err != nil {
+		return err
+	}
+
+	s.swVersion, err = s.RunningVersion(ctx)
+	if err != nil {
 		return err
 	}
 
@@ -420,16 +438,15 @@ func (s *srl) CheckDeploymentConditions(ctx context.Context) error {
 func (s *srl) createSRLFiles() error {
 	log.Debugf("Creating directory structure for SRL container: %s", s.Cfg.ShortName)
 	var src string
-	var dst string
 
 	if s.Cfg.License != "" {
 		// copy license file to node specific directory in lab
 		src = s.Cfg.License
-		dst = filepath.Join(s.Cfg.LabDir, "license.key")
-		if err := utils.CopyFile(src, dst, 0644); err != nil {
-			return fmt.Errorf("CopyFile src %s -> dst %s failed %v", src, dst, err)
+		licPath := filepath.Join(s.Cfg.LabDir, "license.key")
+		if err := utils.CopyFile(src, licPath, 0644); err != nil {
+			return fmt.Errorf("CopyFile src %s -> dst %s failed %v", src, licPath, err)
 		}
-		log.Debugf("CopyFile src %s -> dst %s succeeded", src, dst)
+		log.Debugf("CopyFile src %s -> dst %s succeeded", src, licPath)
 	}
 
 	// generate SRL topology file, including base MAC
@@ -443,9 +460,9 @@ func (s *srl) createSRLFiles() error {
 	// generate a startup config file
 	// if the node has a `startup-config:` statement, the file specified in that section
 	// will be used as a template in GenerateConfig()
+	var cfgTemplate string
+	cfgPath := filepath.Join(s.Cfg.LabDir, "config", "config.json")
 	if s.Cfg.StartupConfig != "" {
-		dst = filepath.Join(s.Cfg.LabDir, "config", "config.json")
-
 		log.Debugf("Reading startup-config %s", s.Cfg.StartupConfig)
 
 		c, err := os.ReadFile(s.Cfg.StartupConfig)
@@ -468,13 +485,18 @@ func (s *srl) createSRLFiles() error {
 			// as we will apply it over the top of a default config in the post deploy stage
 			return nil
 		}
+		cfgTemplate = string(c)
+	}
 
-		cfgTemplate := string(c)
+	if cfgTemplate == "" {
+		log.Debugf("configuration template for node %s is empty, skipping startup config file generation", s.Cfg.ShortName)
 
-		err = s.GenerateConfig(dst, cfgTemplate)
-		if err != nil {
-			log.Errorf("node=%s, failed to generate config: %v", s.Cfg.ShortName, err)
-		}
+		return nil
+	}
+
+	err = s.GenerateConfig(cfgPath, cfgTemplate)
+	if err != nil {
+		log.Errorf("node=%s, failed to generate config: %v", s.Cfg.ShortName, err)
 	}
 
 	return err
@@ -504,26 +526,81 @@ func generateSRLTopologyFile(cfg *types.NodeConfig) error {
 	return f.Close()
 }
 
+// srlTemplateData top level data struct.
+type srlTemplateData struct {
+	TLSKey     string
+	TLSCert    string
+	TLSAnchor  string
+	Banner     string
+	IFaces     map[string]tplIFace
+	SSHPubKeys string
+}
+
+// tplIFace template interface struct.
+type tplIFace struct {
+	Slot       string
+	Port       string
+	BreakoutNo string
+	Mtu        int
+}
+
 // addDefaultConfig adds srl default configuration such as tls certs, gnmi/json-rpc, login-banner.
-func (s *srl) addDefaultConfig(ctx context.Context) error {
-	b, err := s.banner(ctx)
+func (n *srl) addDefaultConfig(ctx context.Context) error {
+	b, err := n.banner()
 	if err != nil {
 		return err
 	}
 
 	// struct that holds data used in templating of the default config snippet
-	tplData := struct {
-		*types.NodeConfig
-		Banner string
-	}{
-		s.Cfg,
-		b,
+
+	tplData := srlTemplateData{
+		TLSKey:    n.Cfg.TLSKey,
+		TLSCert:   n.Cfg.TLSCert,
+		TLSAnchor: n.Cfg.TLSAnchor,
+		Banner:    b,
+		IFaces:    map[string]tplIFace{},
 	}
 
-	// remove newlines from tls key/cert so that they nicely apply via the cli provisioning
-	// during the template execution
-	tplData.TLSKey = strings.TrimSpace(tplData.TLSKey)
-	tplData.TLSCert = strings.TrimSpace(tplData.TLSCert)
+	n.filterSSHPubKeys()
+
+	// in srlinux >= v23.10+ linuxadmin and admin user ssh keys can only be configured via the cli
+	// so we add the keys to the template data for rendering.
+	if semver.Compare(n.swVersion.String(), "v23.10") >= 0 || n.swVersion.major == "0" {
+		tplData.SSHPubKeys = catenateKeys(n.sshPubKeys)
+	}
+
+	// prepare the endpoints
+	for _, e := range n.Endpoints {
+		ifName := e.GetIfaceName()
+		// split the interface identifier into their parts
+		ifNameParts := strings.SplitN(strings.TrimLeft(ifName, "e"), "-", 3)
+
+		// create a template interface struct
+		iface := tplIFace{
+			Slot: ifNameParts[0],
+			Port: ifNameParts[1],
+		}
+		// if it is a breakout port add the breakout identifier
+		if len(ifNameParts) == 3 {
+			iface.BreakoutNo = ifNameParts[2]
+		}
+
+		// for MACVlan interfaces we need to figure out the parent interface MTU
+		// and specifically define it in the config
+		//
+		// via the endpoint we acquire the link, and check if the link is of type LinkMacVlan
+		// if so cast it and get the parent Interface MTU and finally set that for the interface
+		if link, ok := e.GetLink().(*links.LinkMacVlan); ok {
+			mtu, err := link.GetParentInterfaceMtu()
+			if err != nil {
+				return err
+			}
+			iface.Mtu = mtu
+		}
+
+		// add the template interface definition to the template data
+		tplData.IFaces[ifName] = iface
+	}
 
 	buf := new(bytes.Buffer)
 	err = srlCfgTpl.Execute(buf, tplData)
@@ -531,13 +608,13 @@ func (s *srl) addDefaultConfig(ctx context.Context) error {
 		return err
 	}
 
-	log.Debugf("Node %q additional config:\n%s", s.Cfg.ShortName, buf.String())
+	log.Debugf("Node %q additional config:\n%s", n.Cfg.ShortName, buf.String())
 
 	execCmd := exec.NewExecCmdFromSlice([]string{
 		"bash", "-c",
 		fmt.Sprintf("echo '%s' > /tmp/clab-config", buf.String()),
 	})
-	_, err = s.RunExec(ctx, execCmd)
+	_, err = n.RunExec(ctx, execCmd)
 	if err != nil {
 		return err
 	}
@@ -547,12 +624,12 @@ func (s *srl) addDefaultConfig(ctx context.Context) error {
 		return err
 	}
 
-	execResult, err := s.RunExec(ctx, cmd)
+	execResult, err := n.RunExec(ctx, cmd)
 	if err != nil {
 		return err
 	}
 
-	log.Debugf("node %s. stdout: %s, stderr: %s", s.Cfg.ShortName, execResult.GetStdOutString(), execResult.GetStdErrString())
+	log.Debugf("node %s. stdout: %s, stderr: %s", n.Cfg.ShortName, execResult.GetStdOutString(), execResult.GetStdErrString())
 
 	return nil
 }
@@ -660,12 +737,12 @@ func (s *srl) CheckInterfaceName() error {
 	ifRe := regexp.MustCompile(`e\d+-\d+(-\d+)?|mgmt0`)
 	nm := strings.ToLower(s.Cfg.NetworkMode)
 
-	for _, e := range s.Config().Endpoints {
-		if !ifRe.MatchString(e.EndpointName) {
-			return fmt.Errorf("nokia sr linux interface name %q doesn't match the required pattern. SR Linux interfaces should be named as e1-1 or e1-1-1", e.EndpointName)
+	for _, e := range s.Endpoints {
+		if !ifRe.MatchString(e.GetIfaceName()) {
+			return fmt.Errorf("nokia sr linux interface name %q doesn't match the required pattern. SR Linux interfaces should be named as e1-1 or e1-1-1", e.GetIfaceName())
 		}
 
-		if e.EndpointName == "mgmt0" && nm != "none" {
+		if e.GetIfaceName() == "mgmt0" && nm != "none" {
 			return fmt.Errorf("mgmt0 interface name is not allowed for %s node when network mode is not set to none", s.Cfg.ShortName)
 		}
 	}

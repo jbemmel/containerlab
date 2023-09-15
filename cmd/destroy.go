@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/srl-labs/containerlab/clab"
 	"github.com/srl-labs/containerlab/labels"
+	"github.com/srl-labs/containerlab/links"
 	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/runtime/ignite"
 	"github.com/srl-labs/containerlab/types"
@@ -98,7 +99,7 @@ func destroyFn(_ *cobra.Command, _ []string) error {
 	for topo := range topos {
 		opts := []clab.ClabOption{
 			clab.WithTimeout(timeout),
-			clab.WithTopoFile(topo, varsFile),
+			clab.WithTopoPath(topo, varsFile),
 			clab.WithNodeFilter(nodeFilter),
 			clab.WithRuntime(rt,
 				&runtime.RuntimeConfig{
@@ -116,6 +117,23 @@ func destroyFn(_ *cobra.Command, _ []string) error {
 
 		log.Debugf("going through extracted topos for destroy, got a topo file %v and generated opts list %+v", topo, opts)
 		nc, err := clab.NewContainerLab(opts...)
+		if err != nil {
+			return err
+		}
+
+		err = links.SetMgmtNetUnderlayingBridge(nc.Config.Mgmt.Bridge)
+		if err != nil {
+			return err
+		}
+
+		// create management network or use existing one
+		// we call this to populate the nc.cfg.mgmt.bridge variable
+		// which is needed for the removal of the iptables rules
+		if err = nc.CreateNetwork(ctx); err != nil {
+			return err
+		}
+
+		err = nc.ResolveLinks()
 		if err != nil {
 			return err
 		}
@@ -147,7 +165,7 @@ func destroyFn(_ *cobra.Command, _ []string) error {
 }
 
 func destroyLab(ctx context.Context, c *clab.CLab) (err error) {
-	containers, err := c.ListNodesContainers(ctx)
+	containers, err := c.ListNodesContainersIgnoreNotFound(ctx)
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/srl-labs/containerlab/clab"
 	"github.com/srl-labs/containerlab/clab/exec"
 	"github.com/srl-labs/containerlab/labels"
+	"github.com/srl-labs/containerlab/links"
 	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
 )
@@ -43,7 +44,7 @@ func execFn(_ *cobra.Command, _ []string) error {
 
 	opts := []clab.ClabOption{
 		clab.WithTimeout(timeout),
-		clab.WithTopoFile(topo, varsFile),
+		clab.WithTopoPath(topo, varsFile),
 		clab.WithNodeFilter(nodeFilter),
 		clab.WithRuntime(rt,
 			&runtime.RuntimeConfig{
@@ -55,6 +56,11 @@ func execFn(_ *cobra.Command, _ []string) error {
 		clab.WithDebug(debug),
 	}
 	c, err := clab.NewContainerLab(opts...)
+	if err != nil {
+		return err
+	}
+
+	err = links.SetMgmtNetUnderlayingBridge(c.Config.Mgmt.Bridge)
 	if err != nil {
 		return err
 	}

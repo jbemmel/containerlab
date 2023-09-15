@@ -2,9 +2,10 @@
 Library             OperatingSystem
 Library             String
 Library             Process
+Resource            ../common.robot
 
 Suite Setup         Setup
-Suite Teardown      Run    sudo containerlab --runtime ${runtime} destroy -t ${CURDIR}/01-linux-nodes.clab.yml --cleanup
+Suite Teardown      Run    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/01-linux-nodes.clab.yml --cleanup
 
 
 *** Variables ***
@@ -29,24 +30,22 @@ Verify number of Hosts entries before deploy
 Deploy ${lab-name} lab
     Log    ${CURDIR}
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo containerlab --runtime ${runtime} deploy -t ${CURDIR}/01-linux-nodes.clab.yml
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} deploy -t ${CURDIR}/${lab-file}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     # save output to be used in next steps
     Set Suite Variable    ${deploy-output}    ${output}
 
 Ensure exec node option works
-    [Documentation]    This tests ensures that the node's exec property that sets commands to be executed upon node deployment works. NOTE that containerd runtime is excluded because it often doesn't have one of the exec commands. To be investigated further.
-    Skip If    '${runtime}' == 'containerd'
+    [Documentation]    This tests ensures that the node's exec property that sets commands to be executed upon node deployment works.
     # ensure exec commands work
     Should Contain    ${deploy-output}    this_is_an_exec_test
     Should Contain    ${deploy-output}    ID=alpine
 
 Exec command with no filtering
     [Documentation]    This tests ensures that when `exec` command is called without user provided filters, the command is executed on all nodes of the lab.
-    Skip If    '${runtime}' == 'containerd'
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo containerlab --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --cmd 'uname -n'
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --cmd 'uname -n'
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     # check if output contains the escaped string, as this is how logrus prints to non tty outputs.
@@ -62,9 +61,8 @@ Exec command with no filtering
 
 Exec command with filtering
     [Documentation]    This tests ensures that when `exec` command is called with user provided filters, the command is executed ONLY on selected nodes of the lab.
-    Skip If    '${runtime}' == 'containerd'
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo containerlab --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --label clab-node-name\=l1 --cmd 'uname -n'
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --label clab-node-name\=l1 --cmd 'uname -n'
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     # check if output contains the escaped string, as this is how logrus prints to non tty outputs.
@@ -76,9 +74,8 @@ Exec command with filtering
 
 Exec command with json output and filtering
     [Documentation]    This tests ensures that when `exec` command is called with user provided filters and json output, the command is executed ONLY on selected nodes of the lab and the actual JSON is populated to stdout.
-    Skip If    '${runtime}' == 'containerd'
     ${output} =    Process.Run Process
-    ...    sudo containerlab --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --label clab-node-name\=l1 --format json --cmd 'cat /test.json' | jq '.[][0].stdout.containerlab'
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --label clab-node-name\=l1 --format json --cmd 'cat /test.json' | jq '.[][0].stdout.containerlab'
     ...    shell=True
     Log    ${output.stdout}
     Log    ${output.stderr}
@@ -86,16 +83,30 @@ Exec command with json output and filtering
     # check if output contains the json value from the /test.json file
     Should Contain    ${output.stdout}    is cool
 
+Ensure CLAB_INTFS env var is set
+    [Documentation]
+    ...    This test ensures that the CLAB_INTFS environment variable is set in the container
+    ...    and that it contains the correct number of interfaces.
+    ${output} =    Process.Run Process
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --label clab-node-name\=l1 --cmd 'ash -c "echo $CLAB_INTFS"'
+    ...    shell=True
+    Log    ${output.stdout}
+    Log    ${output.stderr}
+    Should Be Equal As Integers    ${output.rc}    0
+    # l1 node has 3 interfaces defined in the lab topology
+    # log outputs to stderr, and thus we check for 3 interfaces there
+    # may be worth to change this to stdout in the future
+    # we literally check if the string stdout:\n3 is present in the output, as this is how
+    # the result is printed today.
+    Should Contain    ${output.stderr}    stdout:\\n3
+
 Inspect ${lab-name} lab
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo containerlab --runtime ${runtime} inspect --name ${lab-name}
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} inspect --name ${lab-name}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
 Define runtime exec command
-    IF    "${runtime}" == "containerd"
-        Set Suite Variable    ${runtime-cli-exec-cmd}    sudo ctr -n clab t exec --exec-id clab
-    END
     IF    "${runtime}" == "podman"
         Set Suite Variable    ${runtime-cli-exec-cmd}    sudo podman exec
     END
@@ -111,6 +122,12 @@ Verify links in node l1
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     Should Contain    ${output}    state UP
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    ${runtime-cli-exec-cmd} clab-${lab-name}-l1 ip link show eth3
+    Log    ${output}
+    Should Be Equal As Integers    ${rc}    0
+    Should Contain    ${output}    state UP
+    Should Contain    ${output}    02:00:00:00:00:00
 
 Verify links in node l2
     ${rc}    ${output} =    Run And Return Rc And Output
@@ -123,10 +140,40 @@ Verify links in node l2
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     Should Contain    ${output}    state UP
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    ${runtime-cli-exec-cmd} clab-${lab-name}-l2 ip link show eth3
+    Log    ${output}
+    Should Be Equal As Integers    ${rc}    0
+    Should Contain    ${output}    state UP
+    Should Contain    ${output}    02:00:00:00:00:01
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    ${runtime-cli-exec-cmd} clab-${lab-name}-l2 ip link show eth4
+    Log    ${output}
+    Should Be Equal As Integers    ${rc}    0
+    Should Contain    ${output}    state UP
+    Should Contain    ${output}    02:00:00:00:00:04
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    ${runtime-cli-exec-cmd} clab-${lab-name}-l2 ip link show eth5
+    Log    ${output}
+    Should Be Equal As Integers    ${rc}    0
+    Should Contain    ${output}    state UP
+    Should Contain    ${output}    02:00:00:00:00:05
+
+Verify links on host
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    ip link show l2eth4
+    Log    ${output}
+    Should Be Equal As Integers    ${rc}    0
+    Should Contain    ${output}    state UP
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    ip link show l2eth5mgmt
+    Log    ${output}
+    Should Be Equal As Integers    ${rc}    0
+    Should Contain    ${output}    state UP
 
 Ensure "inspect all" outputs IP addresses
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo containerlab --runtime ${runtime} inspect --all
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} inspect --all
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     # get a 3rd line from the bottom of the inspect cmd.
@@ -197,16 +244,11 @@ Verify Hosts entries exist
 
     Should Be Equal As Integers    ${rc}    0
 
-    IF    '${runtime}' == 'podman'
-        Should Contain    ${output}    6
-    END
-    IF    '${runtime}' == 'docker'
-        Should Contain    ${output}    6
-    END
+    IF    '${runtime}' == 'podman'    Should Contain    ${output}    6
+    IF    '${runtime}' == 'docker'    Should Contain    ${output}    6
 
 Verify Mem and CPU limits are set
     [Documentation]    Checking if cpu and memory limits set for a node has been reflected in the host config
-    Skip If    '${runtime}' == 'containerd'
     ${rc}    ${output} =    Run And Return Rc And Output
     ...    sudo ${runtime} inspect clab-${lab-name}-l1 -f '{{.HostConfig.Memory}} {{.HostConfig.CpuQuota}}'
     Log    ${output}
@@ -256,7 +298,7 @@ Verify DNS-Options Config
 
 Destroy ${lab-name} lab
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo containerlab --runtime ${runtime} destroy -t ${CURDIR}/01-linux-nodes.clab.yml --cleanup
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file} --cleanup
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
@@ -285,7 +327,7 @@ Verify iptables allow rule are gone
 
 *** Keywords ***
 Setup
-    Run    rm -rf ${bind-orig-path}
+    Run    sudo rm -rf ${bind-orig-path}
     OperatingSystem.Create File    ${bind-orig-path}    Hello, containerlab
 
 Match IPv6 Address

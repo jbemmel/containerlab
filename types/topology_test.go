@@ -4,12 +4,9 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/srl-labs/containerlab/utils"
 	"golang.org/x/exp/slices"
 )
-
-func boolptr(b bool) *bool {
-	return &b
-}
 
 var topologyTestSet = map[string]struct {
 	input *Topology
@@ -22,14 +19,14 @@ var topologyTestSet = map[string]struct {
 					Kind:       "srl",
 					CPU:        1,
 					Memory:     "1G",
-					AutoRemove: boolptr(true),
+					AutoRemove: utils.BoolPointer(true),
 					DNS: &DNSConfig{
 						Servers: []string{"1.1.1.1"},
 						Search:  []string{"foo.com"},
 						Options: []string{"someopt"},
 					},
 					Certificate: &CertificateConfig{
-						Issue: true,
+						Issue: utils.BoolPointer(true),
 					},
 				},
 			},
@@ -39,14 +36,14 @@ var topologyTestSet = map[string]struct {
 				Kind:       "srl",
 				CPU:        1,
 				Memory:     "1G",
-				AutoRemove: boolptr(true),
+				AutoRemove: utils.BoolPointer(true),
 				DNS: &DNSConfig{
 					Servers: []string{"1.1.1.1"},
 					Search:  []string{"foo.com"},
 					Options: []string{"someopt"},
 				},
 				Certificate: &CertificateConfig{
-					Issue: true,
+					Issue: utils.BoolPointer(true),
 				},
 			},
 		},
@@ -84,14 +81,14 @@ var topologyTestSet = map[string]struct {
 					},
 					CPU:        1,
 					Memory:     "1G",
-					AutoRemove: boolptr(true),
+					AutoRemove: utils.BoolPointer(true),
 					DNS: &DNSConfig{
 						Servers: []string{"8.8.8.8"},
 						Search:  []string{"bar.com"},
 						Options: []string{"someotheropt"},
 					},
 					Certificate: &CertificateConfig{
-						Issue: true,
+						Issue: utils.BoolPointer(true),
 					},
 				},
 			},
@@ -105,7 +102,7 @@ var topologyTestSet = map[string]struct {
 						"label2": "notv2",
 					},
 					Memory:     "2G",
-					AutoRemove: boolptr(false),
+					AutoRemove: utils.BoolPointer(false),
 					DNS: &DNSConfig{
 						Servers: []string{"1.1.1.1"},
 						Search:  []string{"foo.com"},
@@ -146,14 +143,14 @@ var topologyTestSet = map[string]struct {
 				},
 				CPU:        1,
 				Memory:     "2G",
-				AutoRemove: boolptr(false),
+				AutoRemove: utils.BoolPointer(false),
 				DNS: &DNSConfig{
 					Servers: []string{"1.1.1.1"},
 					Search:  []string{"foo.com"},
 					Options: []string{"someopt"},
 				},
 				Certificate: &CertificateConfig{
-					Issue: true,
+					Issue: utils.BoolPointer(true),
 				},
 			},
 		},
@@ -255,6 +252,9 @@ var topologyTestSet = map[string]struct {
 					Search:  []string{"foo.com"},
 					Options: []string{"someopt"},
 				},
+				Certificate: &CertificateConfig{
+					Issue: utils.BoolPointer(false),
+				},
 			},
 		},
 	},
@@ -331,11 +331,14 @@ var topologyTestSet = map[string]struct {
 				},
 				CPU:        1,
 				Memory:     "1G",
-				AutoRemove: boolptr(false),
+				AutoRemove: utils.BoolPointer(false),
 				DNS: &DNSConfig{
 					Servers: []string{"1.1.1.1"},
 					Search:  []string{"foo.com"},
 					Options: []string{"someopt"},
+				},
+				Certificate: &CertificateConfig{
+					Issue: utils.BoolPointer(false),
 				},
 			},
 		},
@@ -386,14 +389,8 @@ func TestGetNodeType(t *testing.T) {
 func TestGetNodeConfig(t *testing.T) {
 	for name, item := range topologyTestSet {
 		t.Logf("%q test item", name)
-		config, err := item.input.GetNodeStartupConfig("node1")
-		if err != nil {
-			t.Fatal(err)
-		}
+		config := item.input.GetNodeStartupConfig("node1")
 		wantedConfig := item.want["node1"].StartupConfig
-		if err != nil {
-			t.Fatal(err)
-		}
 		t.Logf("%q test item result: %v", name, config)
 		if !cmp.Equal(wantedConfig, config) {
 			t.Errorf("item %q failed", name)
@@ -421,14 +418,8 @@ func TestGetNodeImage(t *testing.T) {
 func TestGetNodeLicense(t *testing.T) {
 	for name, item := range topologyTestSet {
 		t.Logf("%q test item", name)
-		lic, err := item.input.GetNodeLicense("node1")
-		if err != nil {
-			t.Fatal(err)
-		}
+		lic := item.input.GetNodeLicense("node1")
 		wantedLicense := item.want["node1"].License
-		if err != nil {
-			t.Fatal(err)
-		}
 		t.Logf("%q test item result: %v", name, lic)
 		if !cmp.Equal(wantedLicense, lic) {
 			t.Errorf("item %q failed", name)
@@ -542,7 +533,7 @@ func TestGetNodeAutoRemove(t *testing.T) {
 		t.Logf("%q test item", name)
 		autoremove := item.input.GetNodeAutoRemove("node1")
 		t.Logf("%q test item result: %v", name, autoremove)
-		if item.want["node1"].AutoRemove != nil && *item.want["node1"].AutoRemove != *autoremove {
+		if item.want["node1"].AutoRemove != nil && *item.want["node1"].AutoRemove != autoremove {
 			t.Errorf("item %q failed", name)
 			t.Errorf("item %q exp %v", name, item.want["node1"].AutoRemove)
 			t.Errorf("item %q got %v", name, autoremove)

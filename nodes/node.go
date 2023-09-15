@@ -10,10 +10,15 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/srl-labs/containerlab/cert"
 	"github.com/srl-labs/containerlab/clab/exec"
+	"github.com/srl-labs/containerlab/links"
+	"github.com/srl-labs/containerlab/nodes/state"
 	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -50,6 +55,7 @@ type PreDeployParams struct {
 	Cert         *cert.Cert
 	TopologyName string
 	TopoPaths    *types.TopoPaths
+	SSHPubKeys   []ssh.PublicKey
 }
 
 // DeployParams contains parameters for the Deploy function.
@@ -87,6 +93,19 @@ type Node interface {
 	UpdateConfigWithRuntimeInfo(context.Context) error
 	// RunExec execute a single command for a given node.
 	RunExec(ctx context.Context, execCmd *exec.ExecCmd) (*exec.ExecResult, error)
+	// Adds the given link to the Node (container). After adding the Link to the node,
+	// the given function f is called within the Nodes namespace to setup the link.
+	AddLinkToContainer(ctx context.Context, link netlink.Link, f func(ns.NetNS) error) error
+	AddLink(l links.Link)
+	AddEndpoint(e links.Endpoint)
+	GetEndpoints() []links.Endpoint
+	GetLinkEndpointType() links.LinkEndpointType
+	GetShortName() string
+	// DeployLinks deploys the links for the node.
+	DeployLinks(ctx context.Context) error
+	// ExecFunction executes the given function within the nodes network namespace
+	ExecFunction(func(ns.NetNS) error) error
+	GetState() state.NodeState
 }
 
 type NodeOption func(Node)
@@ -109,11 +128,11 @@ func WithRuntime(r runtime.ContainerRuntime) NodeOption {
 
 // GenericVMInterfaceCheck checks interface names for generic VM-based nodes.
 // These nodes could only have interfaces named ethX, where X is >0.
-func GenericVMInterfaceCheck(nodeName string, eps []types.Endpoint) error {
+func GenericVMInterfaceCheck(nodeName string, eps []links.Endpoint) error {
 	ifRe := regexp.MustCompile(`eth[1-9][0-9]*$`)
 	for _, e := range eps {
-		if !ifRe.MatchString(e.EndpointName) {
-			return fmt.Errorf("%q interface name %q doesn't match the required pattern. It should be named as ethX, where X is >0", nodeName, e.EndpointName)
+		if !ifRe.MatchString(e.GetIfaceName()) {
+			return fmt.Errorf("%q interface name %q doesn't match the required pattern. It should be named as ethX, where X is >0", nodeName, e.GetIfaceName())
 		}
 	}
 

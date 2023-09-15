@@ -7,6 +7,7 @@ package types
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/docker/go-connections/nat"
@@ -112,8 +113,10 @@ type NodeConfig struct {
 	StartupDelay uint `json:"startup-delay,omitempty"`
 	// when set to true will enforce the use of startup-config, even when config is present in the lab directory
 	EnforceStartupConfig bool `json:"enforce-startup-config,omitempty"`
+	// when set to true will prevent creation of a startup-config, for auto-provisioning testing (ZTP)
+	SuppressStartupConfig bool `json:"suppress-startup-config,omitempty"`
 	// when set to true will auto-remove a stopped/failed container
-	AutoRemove *bool `json:"auto-remove,omitempty"`
+	AutoRemove bool `json:"auto-remove,omitempty"`
 	// path to config file that is actually mounted to the container and is a result of templation
 	ResStartupConfig string            `json:"startup-config-abs-path,omitempty"`
 	Config           *ConfigDispatcher `json:"config,omitempty"`
@@ -165,8 +168,6 @@ type NodeConfig struct {
 	// Extra /etc/hosts entries for all nodes.
 	ExtraHosts []string          `json:"extra-hosts,omitempty"`
 	Labels     map[string]string `json:"labels,omitempty"` // container labels
-	// Slice of pointers to local endpoints, DO NOT marshal into JSON as it creates a cyclical error
-	Endpoints []Endpoint `json:"-"`
 	// List of Subject Alternative Names (SAN) to be added to the node's TLS certificate
 	SANs []string `json:"SANs,omitempty"`
 	// Ignite sandbox and kernel imageNames
@@ -180,10 +181,20 @@ type NodeConfig struct {
 	Memory string  `json:"memory,omitempty"`
 
 	// Extra node parameters
-	Extras               *Extras    `json:"extras,omitempty"`
-	WaitFor              []string   `json:"wait-for,omitempty"`
-	DNS                  *DNSConfig `json:"dns,omitempty"`
+	Extras  *Extras    `json:"extras,omitempty"`
+	WaitFor []string   `json:"wait-for,omitempty"`
+	DNS     *DNSConfig `json:"dns,omitempty"`
+
+	// Kind parameters
+	////////////////////
+	// IsRootNamespaceBased flag indicates that a certain nodes network
+	// namespace (usually based on the kind) is the root network namespace
 	IsRootNamespaceBased bool
+	// SkipUniquenessCheck prevents the pre-deploy uniqueness check, where
+	// we check, that the given node name is not already present on the host.
+	// Introduced to prevent the check from running with ext-containers, since
+	// they should be present by definition.
+	SkipUniquenessCheck bool
 }
 
 func DisableTxOffload(n *NodeConfig) error {
@@ -316,12 +327,35 @@ type DNSConfig struct {
 	Search []string `yaml:"search,omitempty"`
 }
 
-// CertificateConfig represents the configuration of a TLS infrastructure used by a node.
+// CertificateConfig represents TLS parameters set for a node.
 type CertificateConfig struct {
 	// default false value indicates that the node does not use TLS
-	Issue bool `yaml:"issue,omitempty"`
-	// additional params would go here, e.g. if
-	// different algos would be needed or so
+	Issue *bool `yaml:"issue,omitempty"`
+	// KeySize is the size of the key in bits
+	KeySize int `yaml:"key-size,omitempty"`
+	// ValidityDuration is the duration of the certificate validity
+	ValidityDuration time.Duration `yaml:"validity-duration"`
+}
+
+// Merge merges the given CertificateConfig into the current one.
+func (c *CertificateConfig) Merge(x *CertificateConfig) *CertificateConfig {
+	if x == nil {
+		return c
+	}
+
+	if x.ValidityDuration > 0 {
+		c.ValidityDuration = x.ValidityDuration
+	}
+
+	if x.Issue != nil {
+		c.Issue = x.Issue
+	}
+
+	if x.KeySize > 0 {
+		c.KeySize = x.KeySize
+	}
+
+	return c
 }
 
 // PullPolicyValue represents Image pull policy values.

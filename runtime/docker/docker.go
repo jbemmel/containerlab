@@ -29,6 +29,7 @@ import (
 	"github.com/google/shlex"
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/clab/exec"
+	"github.com/srl-labs/containerlab/links"
 	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
 	"github.com/srl-labs/containerlab/utils"
@@ -68,6 +69,7 @@ func (d *DockerRuntime) Init(opts ...runtime.RuntimeOption) error {
 	for _, o := range opts {
 		o(d)
 	}
+	d.config.VerifyLinkParams = links.NewVerifyLinkParams()
 	return nil
 }
 
@@ -444,7 +446,7 @@ func (d *DockerRuntime) CreateContainer(ctx context.Context, node *types.NodeCon
 		NetworkMode: "",
 		ExtraHosts:  node.ExtraHosts, // add static /etc/hosts entries
 		Resources:   resources,
-		AutoRemove:  *node.AutoRemove,
+		AutoRemove:  node.AutoRemove,
 	}
 
 	if node.DNS != nil {
@@ -461,7 +463,7 @@ func (d *DockerRuntime) CreateContainer(ctx context.Context, node *types.NodeCon
 
 	// regular linux containers may benefit from automatic restart on failure
 	// note, that veth pairs added to this container (outside of eth0) will be lost on restart
-	if node.Kind == "linux" && !*node.AutoRemove {
+	if node.Kind == "linux" && !node.AutoRemove {
 		containerHostConfig.RestartPolicy.Name = "on-failure"
 	}
 
@@ -546,10 +548,13 @@ func (d *DockerRuntime) PullImage(ctx context.Context, imageName string, pullpol
 }
 
 // StartContainer starts a docker container.
-func (d *DockerRuntime) StartContainer(ctx context.Context, cID string, node *types.NodeConfig) (interface{}, error) {
+func (d *DockerRuntime) StartContainer(ctx context.Context, cID string, node runtime.Node) (interface{}, error) {
 	nctx, cancel := context.WithTimeout(ctx, d.config.Timeout)
 	defer cancel()
-	log.Debugf("Start container: %q", node.LongName)
+
+	nodecfg := node.Config()
+
+	log.Debugf("Start container: %q", nodecfg.LongName)
 	err := d.Client.ContainerStart(nctx,
 		cID,
 		dockerTypes.ContainerStartOptions{
@@ -560,8 +565,8 @@ func (d *DockerRuntime) StartContainer(ctx context.Context, cID string, node *ty
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("Container started: %q", node.LongName)
-	err = d.postStartActions(ctx, cID, node)
+	log.Debugf("Container started: %q", nodecfg.LongName)
+	err = d.postStartActions(ctx, cID, nodecfg)
 	return nil, err
 }
 

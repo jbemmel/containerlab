@@ -11,16 +11,21 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sync"
 	"text/template"
 
+	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/hairyhenderson/gomplate/v3"
 	"github.com/hairyhenderson/gomplate/v3/data"
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/cert"
 	"github.com/srl-labs/containerlab/clab/exec"
+	"github.com/srl-labs/containerlab/links"
+	"github.com/srl-labs/containerlab/nodes/state"
 	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
 	"github.com/srl-labs/containerlab/utils"
+	"github.com/vishvananda/netlink"
 )
 
 // DefaultNode implements the Node interface and is embedded to the structs of all other nodes.
@@ -35,6 +40,13 @@ type DefaultNode struct {
 	// OverwriteNode stores the interface used to overwrite methods defined
 	// for DefaultNode, so that particular nodes can provide custom implementations.
 	OverwriteNode NodeOverwrites
+	// List of links that reference the node.
+	Links []links.Link
+	// List of link endpoints that are connected to the node.
+	Endpoints []links.Endpoint
+	// State of the node
+	state      state.NodeState
+	statemutex sync.RWMutex
 }
 
 // NewDefaultNode initializes the DefaultNode structure and receives a NodeOverwrites interface
@@ -120,8 +132,14 @@ func (d *DefaultNode) Deploy(ctx context.Context, _ *DeployParams) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.Runtime.StartContainer(ctx, cID, d.Cfg)
-	return err
+	_, err = d.Runtime.StartContainer(ctx, cID, d)
+	if err != nil {
+		return err
+	}
+
+	d.SetState(state.Deployed)
+
+	return nil
 }
 
 func (d *DefaultNode) Delete(ctx context.Context) error {
@@ -214,11 +232,15 @@ func (d *DefaultNode) GenerateConfig(dst, templ string) error {
 	// If the config file is already present in the node dir
 	// we do not regenerate the config unless EnforceStartupConfig is explicitly set to true and startup-config points to a file
 	// this will persist the changes that users make to a running config when booted from some startup config
-	if utils.FileExists(dst) && (d.Cfg.StartupConfig == "" || !d.Cfg.EnforceStartupConfig) {
-		log.Infof("config file '%s' for node '%s' already exists and will not be generated/reset", dst, d.Cfg.ShortName)
+	if d.Cfg.SuppressStartupConfig {
+		log.Infof("Startup config generation for '%s' node suppressed", d.Cfg.ShortName)
 		return nil
 	} else if d.Cfg.EnforceStartupConfig {
 		log.Infof("Startup config for '%s' node enforced: '%s'", d.Cfg.ShortName, dst)
+		// continue with config generation
+	} else if utils.FileExists(dst) && d.Cfg.StartupConfig == "" {
+		log.Infof("config file '%s' for node '%s' already exists and will not be generated/reset", dst, d.Cfg.ShortName)
+		return nil
 	}
 
 	log.Debugf("generating config for node %s from file %s", d.Cfg.ShortName, d.Cfg.StartupConfig)
@@ -355,7 +377,7 @@ func (d *DefaultNode) VerifyLicenseFileExists(_ context.Context) error {
 // provided in certInfra or generates a new one if it does not exist.
 func (d *DefaultNode) LoadOrGenerateCertificate(certInfra *cert.Cert, topoName string) (nodeCert *cert.Certificate, err error) {
 	// early return if certificate generation is not required
-	if d.Cfg.Certificate == nil || !d.Cfg.Certificate.Issue {
+	if d.Cfg.Certificate == nil || !*d.Cfg.Certificate.Issue {
 		return nil, nil
 	}
 
@@ -378,6 +400,8 @@ func (d *DefaultNode) LoadOrGenerateCertificate(certInfra *cert.Cert, topoName s
 			CommonName:   nodeConfig.ShortName + "." + topoName + ".io",
 			Hosts:        hosts,
 			Organization: "containerlab",
+			KeySize:      d.Cfg.Certificate.KeySize,
+			Expiry:       d.Cfg.Certificate.ValidityDuration,
 		}
 		// Generate the cert for the node
 		nodeCert, err = certInfra.GenerateAndSignNodeCert(certInput)
@@ -393,4 +417,89 @@ func (d *DefaultNode) LoadOrGenerateCertificate(certInfra *cert.Cert, topoName s
 	}
 
 	return nodeCert, nil
+}
+
+func (d *DefaultNode) AddLinkToContainer(_ context.Context, link netlink.Link, f func(ns.NetNS) error) error {
+	// retrieve the namespace handle
+	netns, err := ns.GetNS(d.Cfg.NSPath)
+	if err != nil {
+		return err
+	}
+	// move veth endpoint to namespace
+	if err = netlink.LinkSetNsFd(link, int(netns.Fd())); err != nil {
+		return err
+	}
+	// execute the given function
+	return netns.Do(f)
+}
+
+// ExecFunction executes the given function in the nodes network namespace.
+func (d *DefaultNode) ExecFunction(f func(ns.NetNS) error) error {
+	nspath := d.Cfg.NSPath
+
+	if d.Cfg.IsRootNamespaceBased {
+		nshandle, err := ns.GetCurrentNS()
+		if err != nil {
+			return err
+		}
+		nspath = nshandle.Path()
+	}
+
+	if nspath == "" {
+		return fmt.Errorf("nspath is not set for node %q", d.GetShortName())
+	}
+
+	// retrieve the namespace handle
+	netns, err := ns.GetNS(nspath)
+	if err != nil {
+		return err
+	}
+	// execute the given function
+	return netns.Do(f)
+}
+
+func (d *DefaultNode) AddLink(l links.Link) {
+	d.Links = append(d.Links, l)
+}
+
+func (d *DefaultNode) AddEndpoint(e links.Endpoint) {
+	d.Endpoints = append(d.Endpoints, e)
+}
+
+func (d *DefaultNode) GetEndpoints() []links.Endpoint {
+	return d.Endpoints
+}
+
+// GetLinkEndpointType returns a veth link endpoint type for default nodes.
+// The LinkEndpointTypeVeth indicates a veth endpoint which doesn't require special handling.
+func (d *DefaultNode) GetLinkEndpointType() links.LinkEndpointType {
+	return links.LinkEndpointTypeVeth
+}
+
+func (d *DefaultNode) GetShortName() string {
+	return d.Cfg.ShortName
+}
+
+// DeployLinks deploys links associated with the node.
+func (d *DefaultNode) DeployLinks(ctx context.Context) error {
+	for _, l := range d.Links {
+		err := l.Deploy(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (d *DefaultNode) GetState() state.NodeState {
+	d.statemutex.RLock()
+	defer d.statemutex.RUnlock()
+	return d.state
+}
+
+func (d *DefaultNode) SetState(s state.NodeState) {
+	d.statemutex.Lock()
+	defer d.statemutex.Unlock()
+	d.state = s
 }

@@ -1,6 +1,7 @@
 *** Settings ***
 Library             OperatingSystem
 Library             String
+Resource            ../common.robot
 
 Suite Setup         Setup
 Suite Teardown      Cleanup
@@ -15,13 +16,13 @@ ${runtime}      docker
 *** Test Cases ***
 Deploy ${lab-name} lab
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo containerlab --runtime ${runtime} deploy -t ${CURDIR}/${lab-file}
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} deploy -t ${CURDIR}/${lab-file}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
 Ensure inspect outputs IP addresses
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo containerlab --runtime ${runtime} inspect --name ${lab-name}
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} inspect --name ${lab-name}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     ${line} =    String.Get Line    ${output}    -2
@@ -40,5 +41,5 @@ Setup
 
 Cleanup
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo containerlab --runtime ${runtime} destroy -t ${CURDIR}/${lab-file} --cleanup
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file} --cleanup
     Log    ${output}
