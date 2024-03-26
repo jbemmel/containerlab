@@ -29,8 +29,6 @@ type NodeDefinition struct {
 	Position              string            `yaml:"position,omitempty"`
 	Entrypoint            string            `yaml:"entrypoint,omitempty"`
 	Cmd                   string            `yaml:"cmd,omitempty"`
-	// list of subject Alternative Names (SAN) to be added to the node's certificate
-	SANs []string `yaml:"SANs,omitempty"`
 	// list of commands to run in container
 	Exec []string `yaml:"exec,omitempty"`
 	// list of bind mount compatible strings
@@ -68,12 +66,14 @@ type NodeDefinition struct {
 	Sysctls map[string]string `yaml:"sysctls,omitempty"`
 	// Extra options, may be kind specific
 	Extras *Extras `yaml:"extras,omitempty"`
-	// List of node names to wait for before satarting this particular node
-	WaitFor []string `yaml:"wait-for,omitempty"`
+	// Deployment stages
+	Stages *Stages `yaml:"stages,omitempty"`
 	// DNS configuration
 	DNS *DNSConfig `yaml:"dns,omitempty"`
-	// Certificate Configuration
+	// Certificate configuration
 	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
+	// Healthcheck configuration
+	HealthCheck *HealthcheckConfig `yaml:"healthcheck,omitempty"`
 }
 
 // Interface compliance.
@@ -352,18 +352,11 @@ func (n *NodeDefinition) GetExtras() *Extras {
 	return n.Extras
 }
 
-func (n *NodeDefinition) GetSANs() []string {
+func (n *NodeDefinition) GetStages() *Stages {
 	if n == nil {
 		return nil
 	}
-	return n.SANs
-}
-
-func (n *NodeDefinition) GetWaitFor() []string {
-	if n == nil {
-		return []string{}
-	}
-	return n.WaitFor
+	return n.Stages
 }
 
 func (n *NodeDefinition) GetDns() *DNSConfig {
@@ -378,6 +371,13 @@ func (n *NodeDefinition) GetCertificateConfig() *CertificateConfig {
 		return nil
 	}
 	return n.Certificate
+}
+
+func (n *NodeDefinition) GetHealthcheckConfig() *HealthcheckConfig {
+	if n == nil {
+		return nil
+	}
+	return n.HealthCheck
 }
 
 // ImportEnvs imports all environment variales defined in the shell

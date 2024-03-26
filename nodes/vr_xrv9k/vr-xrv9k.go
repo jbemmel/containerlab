@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	kindnames          = []string{"vr-xrv9k", "vr-cisco_xrv9k"}
+	kindnames          = []string{"cisco_xrv9k", "vr-xrv9k", "vr-cisco_xrv9k"}
 	defaultCredentials = nodes.NewCredentials("clab", "clab@123")
 )
 
@@ -55,7 +55,7 @@ func (n *vrXRV9K) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
 		"PASSWORD":           defaultCredentials.GetPassword(),
 		"CONNECTION_MODE":    nodes.VrDefConnMode,
 		"VCPU":               "2",
-		"RAM":                "12288",
+		"RAM":                "16384",
 		"DOCKER_NET_V4_ADDR": n.Mgmt.IPv4Subnet,
 		"DOCKER_NET_V6_ADDR": n.Mgmt.IPv6Subnet,
 	}

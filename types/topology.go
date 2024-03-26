@@ -226,7 +226,6 @@ func (t *Topology) GetNodeSuppressStartupConfig(name string) bool {
 		}
 	}
 	return false
-
 }
 
 func (t *Topology) GetNodeAutoRemove(name string) bool {
@@ -458,16 +457,6 @@ func (t *Topology) GetSysCtl(name string) map[string]string {
 	return nil
 }
 
-// GetSANs return the Subject Alternative Name configuration for the given node.
-func (t *Topology) GetSANs(name string) []string {
-	if ndef, ok := t.Nodes[name]; ok {
-		if len(ndef.GetSANs()) > 0 {
-			return ndef.GetSANs()
-		}
-	}
-	return nil
-}
-
 // GetNodeExtras returns the 'extras' section for the given node.
 func (t *Topology) GetNodeExtras(name string) *Extras {
 	if ndef, ok := t.Nodes[name]; ok {
@@ -483,14 +472,31 @@ func (t *Topology) GetNodeExtras(name string) *Extras {
 	return t.GetDefaults().GetExtras()
 }
 
-// GetWaitFor return the wait-for configuration for the given node.
-func (t *Topology) GetWaitFor(name string) []string {
-	if ndef, ok := t.Nodes[name]; ok {
-		return utils.MergeStringSlices(
-			t.GetKind(t.GetNodeKind(name)).GetWaitFor(),
-			ndef.GetWaitFor())
+// GetStages return the configuration stages set for the given node.
+// It merges the default, kind and node stages into a single Stages struct
+// with node stages taking precedence over kind stages and default stages.
+func (t *Topology) GetStages(name string) (*Stages, error) {
+	s := NewStages()
+
+	// default Stages
+	defaultStages := t.GetDefaults().Stages
+	if defaultStages != nil {
+		s.Merge(defaultStages)
 	}
-	return nil
+
+	// kind Stages
+	kindStages := t.GetKind(t.GetNodeKind(name)).GetStages()
+	if kindStages != nil {
+		s.Merge(kindStages)
+	}
+
+	// node Stages
+	nodeStages := t.Nodes[name].GetStages()
+	if nodeStages != nil {
+		s.Merge(nodeStages)
+	}
+
+	return s, nil
 }
 
 func (t *Topology) ImportEnvs() {
@@ -516,7 +522,15 @@ func (t *Topology) GetNodeDns(name string) *DNSConfig {
 			return kindDNS
 		}
 	}
-	return t.GetDefaults().GetDns()
+
+	defaultDNS := t.GetDefaults().GetDns()
+	if defaultDNS == nil {
+		// initialize defaultDNS to an empty DNSConfig struct
+		// so that we don't have to check for nil in the caller
+		defaultDNS = &DNSConfig{}
+	}
+
+	return defaultDNS
 }
 
 // GetCertificateConfig returns the certificate configuration for the given node.
@@ -533,4 +547,22 @@ func (t *Topology) GetCertificateConfig(name string) *CertificateConfig {
 		t.Nodes[name].GetCertificateConfig())
 
 	return cc
+}
+
+func (t *Topology) GetHealthCheckConfig(name string) *HealthcheckConfig {
+	if ndef, ok := t.Nodes[name]; ok {
+		nodeHealthcheckConf := ndef.GetHealthcheckConfig()
+		if nodeHealthcheckConf != nil {
+			return nodeHealthcheckConf
+		}
+
+		kindHealthcheckConf := t.GetKind(t.GetNodeKind(name)).GetHealthcheckConfig()
+		if kindHealthcheckConf != nil {
+			return kindHealthcheckConf
+		}
+
+		return t.GetDefaults().GetHealthcheckConfig()
+	}
+
+	return nil
 }

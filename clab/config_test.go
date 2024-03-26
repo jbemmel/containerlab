@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/containers/podman/v4/pkg/util"
-	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
 	"github.com/srl-labs/containerlab/labels"
 	"github.com/srl-labs/containerlab/links"
@@ -22,6 +21,7 @@ import (
 	"github.com/srl-labs/containerlab/runtime/docker"
 	"github.com/srl-labs/containerlab/utils"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 )
 
 func setupTestCase(t *testing.T) func(t *testing.T) {
@@ -75,9 +75,6 @@ func TestLicenseInit(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// fmt.Println(c.Config.Topology.Defaults)
-			// fmt.Println(c.Config.Topology.Kinds)
-			// fmt.Println(c.Config.Topology.Nodes)
 			if filepath.Base(c.Nodes["node1"].Config().License) != tc.want {
 				t.Fatalf("wanted '%s' got '%s'", tc.want, c.Nodes["node1"].Config().License)
 			}
@@ -352,6 +349,8 @@ func TestVerifyLinks(t *testing.T) {
 	teardownTestCase := setupTestCase(t)
 	defer teardownTestCase(t)
 
+	ctx := context.Background()
+
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
@@ -371,12 +370,12 @@ func TestVerifyLinks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = c.verifyLinks()
+			err = c.verifyLinks(ctx)
 			if err != nil && err.Error() != tc.want {
 				t.Fatalf("wanted %q got %q", tc.want, err.Error())
 			}
 			if err == nil && tc.want != "" {
-				t.Fatalf("wanted %q got %q", tc.want, err.Error())
+				t.Fatalf("wanted %q got nil", tc.want)
 			}
 		})
 	}
@@ -394,7 +393,7 @@ func TestLabelsInit(t *testing.T) {
 			want: map[string]string{
 				labels.Containerlab: "topo1",
 				labels.NodeName:     "node1",
-				labels.NodeKind:     "srl",
+				labels.NodeKind:     "nokia_srlinux",
 				labels.NodeType:     "ixrd2",
 				labels.NodeGroup:    "",
 				labels.NodeLabDir:   "../clab-topo1/node1",
@@ -407,7 +406,7 @@ func TestLabelsInit(t *testing.T) {
 			want: map[string]string{
 				labels.Containerlab: "topo1",
 				labels.NodeName:     "node2",
-				labels.NodeKind:     "srl",
+				labels.NodeKind:     "nokia_srlinux",
 				labels.NodeType:     "ixrd2",
 				labels.NodeGroup:    "",
 				labels.NodeLabDir:   "../clab-topo1/node2",
@@ -421,7 +420,7 @@ func TestLabelsInit(t *testing.T) {
 			want: map[string]string{
 				labels.Containerlab: "topo2",
 				labels.NodeName:     "node1",
-				labels.NodeKind:     "srl",
+				labels.NodeKind:     "nokia_srlinux",
 				labels.NodeType:     "ixrd2",
 				labels.NodeGroup:    "",
 				labels.NodeLabDir:   "../clab-topo2/node1",
@@ -435,7 +434,7 @@ func TestLabelsInit(t *testing.T) {
 			want: map[string]string{
 				labels.Containerlab: "topo3",
 				labels.NodeName:     "node2",
-				labels.NodeKind:     "srl",
+				labels.NodeKind:     "nokia_srlinux",
 				labels.NodeType:     "ixrd2",
 				labels.NodeGroup:    "",
 				labels.NodeLabDir:   "../clab-topo3/node2",
@@ -618,13 +617,13 @@ func TestVerifyContainersUniqueness(t *testing.T) {
 			// set mockRuntime parameters
 			mockRuntime := mockruntime.NewMockContainerRuntime(ctrl)
 			c.Runtimes[rtName] = mockRuntime
-			c.globalRuntime = rtName
+			c.globalRuntimeName = rtName
 
 			// prepare runtime result
 			mockRuntime.EXPECT().ListContainers(gomock.Any(), gomock.Any()).AnyTimes().Return(tc.mockResult.c, tc.mockResult.e)
 
 			ctx := context.Background()
-			err = c.VerifyContainersUniqueness(ctx)
+			err = c.verifyContainersUniqueness(ctx)
 			if tc.wantError {
 				assert.Error(t, err)
 			} else {

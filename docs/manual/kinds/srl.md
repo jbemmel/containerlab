@@ -4,7 +4,7 @@ search:
 ---
 # Nokia SR Linux
 
-[Nokia SR Linux](https://www.nokia.com/networks/products/service-router-linux-NOS/) NOS is identified with `srl` or `nokia_srlinux` kind in the [topology file](../topo-def-file.md). A kind defines a supported feature set and a startup procedure of a node.
+[Nokia SR Linux](https://www.nokia.com/networks/products/service-router-linux-NOS/) NOS is identified with `nokia_srlinux` kind in the [topology file](../topo-def-file.md). A kind defines a supported feature set and a startup procedure of a node.
 
 ## Getting SR Linux image
 
@@ -21,60 +21,75 @@ To pull a specific version, use tags that match the released version and are lis
 
 There are many ways to manage SR Linux nodes, ranging from classic CLI management all the way up to the gNMI programming.
 
-=== "bash"
-    to connect to a `bash` shell of a running SR Linux container:
-    ```bash
-    docker exec -it <container-name/id> bash
-    ```
-=== "CLI/SSH"
-    to connect to the SR Linux CLI
-    ```bash
-    docker exec -it <container-name/id> sr_cli
-    ```  
-    or with SSH `ssh admin@<container-name>`
-=== "gNMI"
-    using the best in class [gnmic](https://gnmic.kmrd.dev) gNMI client as an example:
-    ```bash
-    gnmic -a <container-name/node-mgmt-address> --skip-verify \
-    -u admin -p admin \
-    -e json_ietf \
-    get --path /system/name/host-name
-    ```
-=== "JSON-RPC"
-    SR Linux has a JSON-RPC interface running over ports 80/443 for HTTP/HTTPS schemas.
+/// tab | bash
+to connect to a `bash` shell of a running SR Linux container:
 
-    HTTPS server uses the same TLS certificate as gNMI server.
+```bash
+docker exec -it <container-name/id> bash
+```
 
-    Here is an example of getting version information with JSON-RPC:
-    ```shell
-    curl http://admin:admin@clab-srl-srl/jsonrpc -d @- << EOF
+///
+
+/// tab | CLI/SSH
+to connect to the SR Linux CLI
+
+```bash
+docker exec -it <container-name/id> sr_cli
+```  
+
+or with SSH `ssh admin@<container-name>`
+///
+/// tab | gNMI
+using the best in class [gnmic](https://gnmic.kmrd.dev) gNMI client as an example:
+
+```bash
+gnmic -a <container-name/node-mgmt-address> --skip-verify \
+-u admin -p admin \
+-e json_ietf \
+get --path /system/name/host-name
+```
+
+///
+/// tab | JSON-RPC
+SR Linux has a JSON-RPC interface running over ports 80/443 for HTTP/HTTPS schemas.
+
+HTTPS server uses the same TLS certificate as gNMI server.
+
+Here is an example of getting version information with JSON-RPC:
+
+```shell
+curl http://admin:admin@clab-srl-srl/jsonrpc -d @- << EOF
+{
+    "jsonrpc": "2.0",
+    "id": 0,
+    "method": "get",
+    "params":
     {
-        "jsonrpc": "2.0",
-        "id": 0,
-        "method": "get",
-        "params":
-        {
-            "commands":
-            [
-                {
-                    "path": "/system/information/version",
-                    "datastore": "state"
-                }
-            ]
-        }
+        "commands":
+        [
+            {
+                "path": "/system/information/version",
+                "datastore": "state"
+            }
+        ]
     }
-    EOF
-    ```
-=== "SNMP"
-    SR Linux nodes come up with SNMP server enabled and running on port 161. The default SNMP community is `public`.
+}
+EOF
+```
 
-    ```shell
-    docker run --init -ti goatatwork/snmpwalk:latest -v 2c -c public $address
-    ```
+///
+/// tab | SNMP
+SR Linux nodes come up with SNMPv2 server enabled and running on port 161. The default SNMP community is `public`.
 
-!!!info
-    Default credentials[^4]: `admin:NokiaSrl1!`  
-    Containerlab will automatically enable public-key authentication for `root`, `admin` and `linuxadmin` users if public key files are found at `~/.ssh` directory[^1].
+```shell
+docker run --init -ti goatatwork/snmpwalk:latest -v 2c -c public $address
+```
+
+///
+/// note
+Default credentials[^4]: `admin:NokiaSrl1!`  
+Containerlab will automatically enable public-key authentication for `root`, `admin` and `linuxadmin` users if public key files are found at `~/.ssh` directory[^1].
+///
 
 ## Interfaces mapping
 
@@ -114,9 +129,11 @@ The breakout interfaces will have the name `eX-Y-Z` where `Z` is the breakout po
 
 For SR Linux nodes [`type`](../nodes.md#type) defines the hardware variant that this node will emulate.
 
-The available type values are: `ixrd1`, `ixrd2`, `ixrd3`, `ixrd2l`, `ixrd3l`, `ixrd4`, `ixrd5`, `ixrd5t`, `ixrh2`, `ixrh3` and `ixrh4`, which correspond to a hardware variant of Nokia 7220 IXR chassis.
+The available 7220 IXR models support the following types: `ixrd1`, `ixrd2`, `ixrd3`, `ixrd2l`, `ixrd3l`, `ixrd4`, `ixrd5`, `ixrd5t`, `ixrh2`, `ixrh3` and `ixrh4`.
 
-Nokia 7250 IXR chassis identified with types `ixr6e` and `ixr10e` require a valid license to boot.
+Nokia 7250 IXR chassis identified with types `ixr6e`, `ixr10e`, `ixrx3b` and `ixrx1b` require a valid license to operate.
+
+Nokia 7730 SXR models are identified with types `sxr1x44s`, `sxr1d32d` and require a valid license to operate.
 
 If type is not set in the clab file `ixrd2` value will be used by containerlab.
 
@@ -128,7 +145,7 @@ SR Linux uses a `/etc/opt/srlinux/config.json` file to persist its configuration
 
 #### Default node configuration
 
-When a node is defined without the `startup-config` statement present, containerlab will make [additional configurations](https://github.com/srl-labs/containerlab/blob/main/nodes/srl/srl.go#L38) on top of the factory config:
+When a node is defined without the `startup-config` statement present, containerlab will make [additional configurations](https://github.com/srl-labs/containerlab/blob/srl-template-in-a-file/nodes/srl/srl_default_config.go.tpl) on top of the factory config:
 
 ```yaml
 # example of a topo file that does not define a custom startup-config
@@ -138,18 +155,19 @@ name: srl_lab
 topology:
   nodes:
     srl1:
-      kind: srl
+      kind: nokia_srlinux
       type: ixrd3
 ```
 
-The generated config will be saved by the path `clab-<lab_name>/<node-name>/config/config.json`. Using the example topology presented above, the exact path to the config will be `clab-srl_lab/srl1/config/config.json`.
+The rendered config can be found at `/tmp/clab-default-config` path on SR Linux filesystem and will be saved by the path `clab-<lab_name>/<node-name>/config/config.json`. Using the example topology presented above, the exact path to the config will be `clab-srl_lab/srl1/config/config.json`.
 
 Additional configurations that containerlab adds on top of the factory config:
 
 * enabling interfaces (`admin-state enable`) referenced in the topology's `links` section
 * enabling LLDP
-* enabling gNMI/JSON-RPC
+* enabling gNMI/gNOI/JSON-RPC as well as enabling unix-socket access for gRPC services
 * creating tls server certificate
+* setting `mgmt0 subinterface 0 ip-mtu` to the MTU value of the underlying container runtime network
 
 A configuration checkpoint named `clab-initial` is generated by containerlab once default and user-provided configs are applied. The checkpoint may be used to quickly revert configuration changes made by a user to a state that was present after the node was started.
 
@@ -168,51 +186,58 @@ A typical lab scenario is to make nodes boot with a pre-configured use case. The
 
 On SR Linux, users can configure the system and capture the changes in the form of CLI instructions using the `info` command. These CLI commands can be saved in a file[^3] and used as a startup configuration.
 
-???info "CLI config examples"
-    these snippets can be the contents of `myconfig.cli` file referenced in the topology below
-    === "Regular config"
-        ```bash
-        network-instance default {
-            interface ethernet-1/1.0 {
-            }
-            interface ethernet-1/2.0 {
-            }
-            protocols {
-                bgp {
+/// details | CLI config examples
+these snippets can be the contents of `myconfig.cli` file referenced in the topology below
+//// tab | Regular config
+
+```bash
+network-instance default {
+    interface ethernet-1/1.0 {
+    }
+    interface ethernet-1/2.0 {
+    }
+    protocols {
+        bgp {
+            admin-state enable
+            autonomous-system 65001
+            router-id 10.0.0.1
+            group rs {
+                peer-as 65003
+                ipv4-unicast {
                     admin-state enable
-                    autonomous-system 65001
-                    router-id 10.0.0.1
-                    group rs {
-                        peer-as 65003
-                        ipv4-unicast {
-                            admin-state enable
-                        }
-                    }
-                    neighbor 192.168.13.2 {
-                        peer-group rs
-                    }
                 }
             }
+            neighbor 192.168.13.2 {
+                peer-group rs
+            }
         }
-        ```
-    === "Flat config"
-        ```bash
-        set / network-instance default protocols bgp admin-state enable
-        set / network-instance default protocols bgp router-id 10.10.10.1
-        set / network-instance default protocols bgp autonomous-system 65001
-        set / network-instance default protocols bgp group ibgp ipv4-unicast admin-state enable
-        set / network-instance default protocols bgp group ibgp export-policy export-lo
-        set / network-instance default protocols bgp neighbor 192.168.1.2 admin-state enable
-        set / network-instance default protocols bgp neighbor 192.168.1.2 peer-group ibgp
-        set / network-instance default protocols bgp neighbor 192.168.1.2 peer-as 65001
-        ```
+    }
+}
+```
+
+////
+//// tab | Flat config
+
+```bash
+set / network-instance default protocols bgp admin-state enable
+set / network-instance default protocols bgp router-id 10.10.10.1
+set / network-instance default protocols bgp autonomous-system 65001
+set / network-instance default protocols bgp group ibgp ipv4-unicast admin-state enable
+set / network-instance default protocols bgp group ibgp export-policy export-lo
+set / network-instance default protocols bgp neighbor 192.168.1.2 admin-state enable
+set / network-instance default protocols bgp neighbor 192.168.1.2 peer-group ibgp
+set / network-instance default protocols bgp neighbor 192.168.1.2 peer-as 65001
+```
+
+////
+///
 
 ```yaml
 name: srl_lab
 topology:
   nodes:
     srl1:
-      kind: srl
+      kind: nokia_srlinux
       type: ixrd3
       image: ghcr.io/nokia/srlinux
       # a path to the partial config in CLI format relative to the current working directory
@@ -230,7 +255,7 @@ name: srl_lab
 topology:
   nodes:
     srl1:
-      kind: srl
+      kind: nokia_srlinux
       type: ixrd3
       image: ghcr.io/nokia/srlinux
       # a path to the full config in JSON format relative to the current working directory
@@ -268,7 +293,7 @@ name: srl_lab_with_custom_agents
 topology:
   nodes:
     srl1:
-      kind: srl
+      kind: nokia_srlinux
       ...
       extras:
         srl-agents:
@@ -304,32 +329,37 @@ Nokia SR Linux nodes support setting of [SANs](../nodes.md#subject-alternative-n
 
 ### License
 
-SR Linux container can run without a license :partying_face:.  
-In that license-less mode, the datapath is limited to 1000 PPS and the sr_linux process will restart once a week.
+SR Linux container can run without a license emulating the datacenter types (7220 IXR) :partying_face:.  
+In that license-less mode, the datapath is limited to 1000 PPS and the `sr_linux` process will restart once a week.
 
-The license file lifts these limitations and a path to it can be provided with [`license`](../nodes.md#license) directive.
+The license file lifts these limitations as well as unlocks chassis-based platform variants and a path to it can be provided with [`license`](../nodes.md#license) directive.
 
 ## Container configuration
 
 To start an SR Linux NOS containerlab uses the configuration that is described in [SR Linux Software Installation Guide](https://documentation.nokia.com/cgi-bin/dbaccessfilename.cgi/3HE16113AAAATQZZA01_V1_SR%20Linux%20R20.6%20Software%20Installation.pdf)
 
-=== "Startup command"
-    `sudo bash -c /opt/srlinux/bin/sr_linux`
-=== "Syscalls"
-    ```
-    net.ipv4.ip_forward = "0"
-    net.ipv6.conf.all.disable_ipv6 = "0"
-    net.ipv6.conf.all.accept_dad = "0"
-    net.ipv6.conf.default.accept_dad = "0"
-    net.ipv6.conf.all.autoconf = "0"
-    net.ipv6.conf.default.autoconf = "0"
-    ```
-=== "Environment variables"
-    `SRLINUX=1`
+/// tab | Startup command
+`sudo bash -c /opt/srlinux/bin/sr_linux`
+///
+/// tab | Syscalls
+
+```
+net.ipv4.ip_forward = "0"
+net.ipv6.conf.all.disable_ipv6 = "0"
+net.ipv6.conf.all.accept_dad = "0"
+net.ipv6.conf.default.accept_dad = "0"
+net.ipv6.conf.all.autoconf = "0"
+net.ipv6.conf.default.autoconf = "0"
+```
+
+///
+/// tab | Environment variables
+`SRLINUX=1`
+///
 
 ### File mounts
 
-When a user starts a lab, containerlab creates a lab directory for storing [configuration artifacts](../conf-artifacts.md). For `srl` kind, containerlab creates directories for each node of that kind.
+When a user starts a lab, containerlab creates a lab directory for storing [configuration artifacts](../conf-artifacts.md). For `nokia_srlinux` kind, containerlab creates directories for each node of that kind.
 
 ```
 ~/clab/clab-srl02
@@ -347,7 +377,7 @@ banner  cli  config.json  devices  tls  ztp
 
 The topology file that defines the emulated hardware type is driven by the value of the kinds `type` parameter. Depending on a specified `type`, the appropriate content will be populated into the `topology.yml` file that will get mounted to `/tmp/topology.yml` directory inside the container in `ro` mode.
 
-#### authorized keys
+#### Authorized keys
 
 Additionally, containerlab will mount the `authorized_keys` file that will have contents of every public key found in `~/.ssh` directory as well as the contents of a `~/.ssh/authorized_keys` file if it exists[^2]. This file will be mounted to `~/.ssh/authorized_keys` path for the following users:
 
@@ -356,6 +386,44 @@ Additionally, containerlab will mount the `authorized_keys` file that will have 
 * `admin`
 
 This will enable passwordless access for the users above if any public key is found in the user's directory.
+
+#### YUM/APT repositories
+
+Containerlab will create and mount repository files for YUM and APT to ensure that SR Linux users can install packages from the aforementioned repos.
+
+The repo files are mounted to the following paths:
+
+* `/etc/yum.repos.d/srlinux.repo` - for YUM package manager (used in SR Linux releases prior to 23.10)
+* `/etc/apt/sources.list.d/srlinux.list` - for APT package manager
+
+### DNS configuration
+
+SR Linux's management stack lives in a separate network namespace `srbase-mgmt`. Due to this fact, the DNS resolver provided by Docker in the root network namespace is not available to the SR Linux management stack.
+
+To enable DNS resolution for SR Linux, containerlab will extract the DNS servers configured on the host system from
+
+* `/etc/resolv.conf`
+* `run/systemd/resolve/resolv.conf`
+
+files and configure IP addresses found there as DNS servers in the management network instance of SR Linux:
+
+```srl
+--{ running }--[  ]--
+A:srl# info system dns  
+    system {
+        dns {
+            network-instance mgmt
+            server-list [
+                # these servers were extracted from the host
+                # and provisioned by containerlab
+                10.171.10.1
+                10.171.10.2
+            ]
+        }
+    }
+```
+
+If you wish to turn off the automatic DNS provisioning, set the `servers` list to an empty value in the [node configuration](../nodes.md#dns).
 
 ## Host Requirements
 

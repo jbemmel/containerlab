@@ -1,10 +1,12 @@
 package links
 
 import (
+	"context"
 	"fmt"
 	"net"
 
 	"github.com/containernetworking/plugins/pkg/ns"
+	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
 
@@ -24,11 +26,20 @@ type Endpoint interface {
 	// GetLink retrieves the link that the endpoint is assigned to
 	GetLink() Link
 	// Verify verifies that the endpoint is valid and can be deployed
-	Verify(*VerifyLinkParams) error
+	Verify(context.Context, *VerifyLinkParams) error
 	// HasSameNodeAndInterface returns true if an endpoint that implements this interface
 	// has the same node and interface name as the given endpoint.
 	HasSameNodeAndInterface(ept Endpoint) bool
-	Remove() error
+	Remove(context.Context) error
+	// Deploy deploys the endpoint by calling the Deploy method of the link it is assigned to
+	// and passing the endpoint as an argument so that the link that consists of A and B endpoints
+	// can deploy them independently.
+	Deploy(context.Context) error
+	// IsNodeless returns true for the endpoints that has no explicit node defined in the topology.
+	// E.g. host endpoints, mgmt bridge endpoints.
+	// Because there is no node that would deploy this side of the link they should be deployed along
+	// with the A side of the veth link.
+	IsNodeless() bool
 }
 
 // EndpointGeneric is the generic endpoint struct that is used by all endpoint types.
@@ -41,13 +52,14 @@ type EndpointGeneric struct {
 	randName string
 }
 
-func NewEndpointGeneric(node Node, iface string) *EndpointGeneric {
+func NewEndpointGeneric(node Node, iface string, link Link) *EndpointGeneric {
 	return &EndpointGeneric{
 		Node:      node,
 		IfaceName: iface,
 		// random name is generated for the endpoint to avoid name collisions
 		// when it is first deployed in the root namespace
 		randName: genRandomIfName(),
+		Link:     link,
 	}
 }
 
@@ -71,8 +83,8 @@ func (e *EndpointGeneric) GetNode() Node {
 	return e.Node
 }
 
-func (e *EndpointGeneric) Remove() error {
-	return e.GetNode().ExecFunction(func(_ ns.NetNS) error {
+func (e *EndpointGeneric) Remove(ctx context.Context) error {
+	return e.GetNode().ExecFunction(ctx, func(n ns.NetNS) error {
 		brSideEp, err := netlink.LinkByName(e.GetIfaceName())
 		_, notfound := err.(netlink.LinkNotFoundError)
 
@@ -83,7 +95,7 @@ func (e *EndpointGeneric) Remove() error {
 		case err != nil:
 			return err
 		}
-
+		log.Debugf("Removing interface %q from namespace %q", e.GetIfaceName(), e.GetNode().GetShortName())
 		return netlink.LinkDel(brSideEp)
 	})
 }
@@ -118,8 +130,8 @@ func CheckEndpointUniqueness(e Endpoint) error {
 
 // CheckEndpointExists checks that a certain
 // interface exists in the network namespace of the given node.
-func CheckEndpointExists(e Endpoint) error {
-	err := CheckEndpointDoesNotExistYet(e)
+func CheckEndpointExists(ctx context.Context, e Endpoint) error {
+	err := CheckEndpointDoesNotExistYet(ctx, e)
 	if err == nil {
 		return fmt.Errorf("interface %q does not exist", e.String())
 	}
@@ -128,15 +140,17 @@ func CheckEndpointExists(e Endpoint) error {
 
 // CheckEndpointDoesNotExistYet verifies that the interface referenced in the
 // provided endpoint does not yet exist in the referenced node.
-func CheckEndpointDoesNotExistYet(e Endpoint) error {
-	return e.GetNode().ExecFunction(func(_ ns.NetNS) error {
+func CheckEndpointDoesNotExistYet(ctx context.Context, e Endpoint) error {
+	return e.GetNode().ExecFunction(ctx, func(_ ns.NetNS) error {
 		// we expect a netlink.LinkNotFoundError when querying for
 		// the interface with the given endpoints name
-		_, err := netlink.LinkByName(e.GetIfaceName())
+		var err error
+		_, err = netlink.LinkByName(e.GetIfaceName())
+
 		if _, notfound := err.(netlink.LinkNotFoundError); notfound {
 			return nil
 		}
 
-		return fmt.Errorf("interface %s is defined via topology but does already exist", e.String())
+		return fmt.Errorf("interface %s is defined via topology but does already exist: %v", e.String(), err)
 	})
 }

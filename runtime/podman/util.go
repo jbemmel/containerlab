@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	netTypes "github.com/containers/common/libnetwork/types"
+	"github.com/containers/image/v5/manifest"
 	"github.com/containers/podman/v4/pkg/bindings/containers"
 	"github.com/containers/podman/v4/pkg/domain/entities"
 	"github.com/containers/podman/v4/pkg/specgen"
@@ -145,7 +147,19 @@ func (r *PodmanRuntime) createContainerSpec(ctx context.Context, cfg *types.Node
 		// CPUQuota:                0,
 	}
 	// Defaults for health checks
-	specHCheckConfig := specgen.ContainerHealthCheckConfig{}
+	specHCheckConfig := specgen.ContainerHealthCheckConfig{
+		HealthConfig: &manifest.Schema2HealthConfig{},
+	}
+
+	if cfg.Healthcheck != nil {
+		specHCheckConfig.HealthConfig.Test = cfg.Healthcheck.Test
+		specHCheckConfig.HealthConfig.Retries = cfg.Healthcheck.Retries
+		specHCheckConfig.HealthConfig.Interval = cfg.Healthcheck.GetIntervalDuration()
+		specHCheckConfig.HealthConfig.StartPeriod =
+			cfg.Healthcheck.GetStartPeriodDuration()
+		specHCheckConfig.HealthConfig.Timeout = cfg.Healthcheck.GetTimeoutDuration()
+	}
+
 	// Everything below is related to network spec of a container
 	specNetConfig := specgen.ContainerNetworkConfig{}
 
@@ -435,8 +449,8 @@ func (r *PodmanRuntime) netOpts(_ context.Context) (netTypes.Network, error) {
 	}
 
 	// add custom mtu if defined
-	if r.mgmt.MTU != "" {
-		options["mtu"] = r.mgmt.MTU
+	if r.mgmt.MTU != 0 {
+		options["mtu"] = strconv.Itoa(r.mgmt.MTU)
 	}
 	// compile the resulting struct
 	toReturn := netTypes.Network{
@@ -458,20 +472,16 @@ func (*PodmanRuntime) buildFilterString(gFilters []*types.GenericFilter) map[str
 	filters := map[string][]string{}
 	for _, gF := range gFilters {
 		filterType := gF.FilterType
-		filterOp := gF.Operator
-		filterValue := gF.Match
-		if filterOp == "exists" {
-			filterOp = "="
-			filterValue = ""
-		}
 		filterStr := ""
-		if filterType == "name" {
-			filterStr = filterValue
-		} else if filterOp != "=" {
+		if gF.Operator == "exists" {
+			filterStr = gF.Field + "="
+		} else if filterType == "name" {
+			filterStr = fmt.Sprintf("^%s$", gF.Match) // this regexp ensure we have an exact match for name
+		} else if gF.Operator != "=" {
 			log.Warnf("received a filter with unsupported match type: %+v", gF)
 			continue
 		} else {
-			filterStr = gF.Field + filterOp + filterValue
+			filterStr = gF.Field + "=" + gF.Match
 		}
 		log.Debugf("produced a filterStr %q from inputs %+v", filterStr, gF)
 		_, ok := filters[filterType]
@@ -491,14 +501,14 @@ func (r *PodmanRuntime) postStartActions(ctx context.Context, cID string, cfg *t
 		return nil
 	}
 	var err error
-	// Add NSpath to the node config struct
-	cfg.NSPath, err = r.GetNSPath(ctx, cID)
+
+	// And setup netns alias. Not really needed with podman
+	// But currently (Oct 2021) clab depends on the specific naming scheme of veth aliases.
+	nspath, err := r.GetNSPath(ctx, cID)
 	if err != nil {
 		return err
 	}
-	// And setup netns alias. Not really needed with podman
-	// But currently (Oct 2021) clab depends on the specific naming scheme of veth aliases.
-	err = utils.LinkContainerNS(cfg.NSPath, cfg.LongName)
+	err = utils.LinkContainerNS(nspath, cfg.LongName)
 	if err != nil {
 		return err
 	}

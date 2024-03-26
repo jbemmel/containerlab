@@ -1,11 +1,13 @@
 package links
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/utils"
+	"github.com/vishvananda/netlink"
 )
 
 type LinkMgmtNetRaw struct {
@@ -45,10 +47,7 @@ func (r *LinkMgmtNetRaw) Resolve(params *ResolveParams) (Link, error) {
 
 	mgmtBridgeNode := GetMgmtBrLinkNode()
 
-	bridgeEp := &EndpointBridge{
-		EndpointGeneric: *NewEndpointGeneric(mgmtBridgeNode, r.HostInterface),
-	}
-	bridgeEp.Link = link
+	bridgeEp := NewEndpointBridge(NewEndpointGeneric(mgmtBridgeNode, r.HostInterface, link), true)
 
 	var err error
 	bridgeEp.MAC, err = utils.GenMac(ClabOUI)
@@ -65,9 +64,12 @@ func (r *LinkMgmtNetRaw) Resolve(params *ResolveParams) (Link, error) {
 	link.Endpoints = []Endpoint{bridgeEp, contEp}
 
 	// add link to respective endpoint nodes
-	bridgeEp.GetNode().AddLink(link)
 	bridgeEp.GetNode().AddEndpoint(bridgeEp)
-	contEp.GetNode().AddLink(link)
+
+	// set default link mtu if MTU is unset
+	if link.MTU == 0 {
+		link.MTU = DefaultLinkMTU
+	}
 
 	return link, nil
 }
@@ -77,18 +79,23 @@ func (*LinkMgmtNetRaw) GetType() LinkType {
 }
 
 func mgmtNetLinkFromBrief(lb *LinkBriefRaw, specialEPIndex int) (*LinkMgmtNetRaw, error) {
-	_, hostIf, node, nodeIf := extractHostNodeInterfaceData(lb, specialEPIndex)
-
-	result := &LinkMgmtNetRaw{
-		LinkCommonParams: LinkCommonParams{
-			MTU:    lb.MTU,
-			Labels: lb.Labels,
-			Vars:   lb.Vars,
-		},
-		HostInterface: hostIf,
-		Endpoint:      NewEndpointRaw(node, nodeIf, ""),
+	_, hostIf, node, nodeIf, err := extractHostNodeInterfaceData(lb, specialEPIndex)
+	if err != nil {
+		return nil, err
 	}
-	return result, nil
+
+	link := &LinkMgmtNetRaw{
+		LinkCommonParams: lb.LinkCommonParams,
+		HostInterface:    hostIf,
+		Endpoint:         NewEndpointRaw(node, nodeIf, ""),
+	}
+
+	// set default link mtu if MTU is unset
+	if link.MTU == 0 {
+		link.MTU = DefaultLinkMTU
+	}
+
+	return link, nil
 }
 
 var _mgmtBrLinkMgmtBrInstance *mgmtBridgeLinkNode
@@ -101,6 +108,29 @@ type mgmtBridgeLinkNode struct {
 
 func (*mgmtBridgeLinkNode) GetLinkEndpointType() LinkEndpointType {
 	return LinkEndpointTypeBridge
+}
+
+func (b *mgmtBridgeLinkNode) AddLinkToContainer(_ context.Context, link netlink.Link, f func(ns.NetNS) error) error {
+	// retrieve the namespace handle
+	ns, err := ns.GetCurrentNS()
+	if err != nil {
+		return err
+	}
+
+	// get the bridge as netlink.Link
+	br, err := netlink.LinkByName(b.shortname)
+	if err != nil {
+		return err
+	}
+
+	// assign the bridge to the link as master
+	err = netlink.LinkSetMaster(link, br)
+	if err != nil {
+		return err
+	}
+
+	// execute the given function
+	return ns.Do(f)
 }
 
 func getMgmtBrLinkNode() *mgmtBridgeLinkNode {

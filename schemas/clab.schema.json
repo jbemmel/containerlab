@@ -26,15 +26,6 @@
                         "IfNotPresent"
                     ]
                 },
-                "SANs": {
-                    "type": "array",
-                    "description": "list of subject alternative names (SAN) to use for this node",
-                    "markdownDescription": "list of [subject alternative names](https://containerlab.dev/manual/nodes/#subject-alternative-names) to use for this node",
-                    "items": {
-                        "type": "string"
-                    },
-                    "uniqueItems": true
-                },
                 "kind": {
                     "type": "string",
                     "description": "kind of this node",
@@ -48,35 +39,49 @@
                         "juniper_crpd",
                         "sonic-vs",
                         "vr-sros",
+                        "nokia_sros",
                         "vr-nokia_sros",
                         "vr-vmx",
                         "vr-juniper_vmx",
+                        "juniper_vmx",
                         "vr-vqfx",
                         "vr-juniper_vqfx",
+                        "juniper_vqfx",
                         "vr-vsrx",
                         "vr-juniper_vsrx",
+                        "juniper_vsrx",
                         "vr-vjunosswitch",
                         "vr-juniper_vjunosswitch",
+                        "juniper_vjunosswitch",
+                        "juniper_vjunosevolved",
                         "vr-xrv",
                         "vr-cisco_xrv",
+                        "cisco_xrv",
                         "vr-xrv9k",
                         "vr-cisco_xrv9k",
-                        "vr-nxos",
-                        "vr-cisco_nxos",
+                        "cisco_xrv9k",
                         "vr-veos",
                         "vr-arista_veos",
+                        "arista_veos",
                         "vr-csr",
                         "vr-cisco_csr",
+                        "cisco_csr1000v",
                         "vr-pan",
                         "vr-paloalto_panos",
+                        "paloalto_panos",
                         "vr-ros",
                         "vr-mikrotik_ros",
+                        "mikrotik_ros",
                         "vr-n9kv",
                         "vr-cisco_n9kv",
+                        "cisco_n9kv",
+                        "cisco_ftdv",
                         "vr-ftosv",
                         "vr-dell_ftosv",
+                        "dell_ftosv",
                         "vr-aoscx",
                         "vr-aruba_aoscx",
+                        "aruba_aoscx",
                         "linux",
                         "bridge",
                         "ovs-bridge",
@@ -92,7 +97,10 @@
                         "c8000",
                         "cisco_c8000",
                         "cvx",
-                        "cumulus_cvx"
+                        "cumulus_cvx",
+                        "openbsd",
+                        "freebsd",
+                        "fortinet_fortigate"
                     ]
                 },
                 "license": {
@@ -290,14 +298,9 @@
                 "config": {
                     "$ref": "#/definitions/config-config"
                 },
-                "wait-for": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "uniqueItems": true,
-                    "description": "Define which nodes should be started before this node will start",
-                    "markdownDescription": "[wait-for](https://containerlab.dev/manual/nodes/#cmd) defines which nodes should be started before this node will start"
+                "stages": {
+                    "type": "object",
+                    "$ref": "#/definitions/stages-config"
                 },
                 "dns": {
                     "type": "object",
@@ -306,6 +309,10 @@
                 "certificate": {
                     "type": "object",
                     "$ref": "#/definitions/certificate-config"
+                },
+                "healthcheck": {
+                    "type": "object",
+                    "$ref": "#/definitions/healthcheck-config"
                 }
             },
             "allOf": [
@@ -334,6 +341,7 @@
                             "type": {
                                 "type": "string",
                                 "enum": [
+                                    "ixsa1",
                                     "ixrd1",
                                     "ixrd2",
                                     "ixrd3",
@@ -348,7 +356,11 @@
                                     "ixr6",
                                     "ixr6e",
                                     "ixr10",
-                                    "ixr10e"
+                                    "ixr10e",
+                                    "sxr1x44s",
+                                    "sxr1d32d",
+                                    "ixrx1b",
+                                    "ixrx3b"
                                 ]
                             }
                         }
@@ -384,6 +396,7 @@
                                             "sr-a4",
                                             "ixr-e-small",
                                             "ixr-e-big",
+                                            "ixr-e2",
                                             "ixr-ec",
                                             "ixr-r6",
                                             "ixr-s"
@@ -462,6 +475,58 @@
                 "issue": {
                     "description": "Set to `true` to generate a TLS certificate for the node",
                     "markdownDescription": "Set to `true` to [generate a TLS certificate for the node](https://containerlab.dev/manual/nodes/#certificate)"
+                },
+                "sans": {
+                    "type": "array",
+                    "description": "list of subject alternative names (SAN) to use for this node",
+                    "markdownDescription": "list of [subject alternative names](https://containerlab.dev/manual/nodes/#subject-alternative-names) to use for this node",
+                    "items": {
+                        "type": "string"
+                    },
+                    "uniqueItems": true
+                },
+                "key-size": {
+                    "type": "integer",
+                    "description": "size of the to be generated key",
+                    "markdownDescription": "size of the to be generated key"
+                },
+                "validity-duration": {
+                    "type": "string",
+                    "description": "Duration for how long the certificate issued by the CA will be valid.",
+                    "markdownDescription": "Duration for how long the certificate issued by the CA will be valid."
+                }
+            }
+        },
+        "healthcheck-config": {
+            "type": "object",
+            "description": "Node's Healthcheck configuration option",
+            "markdownDescription": "Node's [Healthcheck configuration options](https://containerlab.dev/manual/nodes/#healthcheck)",
+            "properties": {
+                "test": {
+                    "type": "array",
+                    "description": "test command",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "interval": {
+                    "type": "integer",
+                    "description": "test execution interval",
+                    "markdownDescription": "test execution interval"
+                },
+                "retries": {
+                    "type": "integer",
+                    "description": "test execution retries",
+                    "markdownDescription": "test execution retries"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "test execution timeout in seconds",
+                    "markdownDescription": "test execution timeout in seconds"
+                },
+                "start-period": {
+                    "type": "integer",
+                    "description": "time in seconds to wait before starting the healthcheck"
                 }
             }
         },
@@ -568,6 +633,131 @@
                     }
                 }
             ]
+        },
+        "stages-config": {
+            "type": "object",
+            "description": "node's stages configurations",
+            "markdownDescription": "node's [stages](https://containerlab.dev/manual/nodes/#stages) configurations",
+            "properties": {
+                "create": {
+                    "type": "object",
+                    "description": "create stage configuration",
+                    "properties": {
+                        "wait-for": {
+                            "$ref": "#/definitions/wait-for-config"
+                        },
+                        "exec": {
+                            "$ref": "#/definitions/stage-exec"
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "create-links": {
+                    "type": "object",
+                    "description": "create stage configuration",
+                    "properties": {
+                        "wait-for": {
+                            "$ref": "#/definitions/wait-for-config"
+                        },
+                        "exec": {
+                            "$ref": "#/definitions/stage-exec"
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "configure": {
+                    "type": "object",
+                    "description": "create stage configuration",
+                    "properties": {
+                        "wait-for": {
+                            "$ref": "#/definitions/wait-for-config"
+                        },
+                        "exec": {
+                            "$ref": "#/definitions/stage-exec"
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "healthy": {
+                    "type": "object",
+                    "description": "create stage configuration",
+                    "properties": {
+                        "wait-for": {
+                            "$ref": "#/definitions/wait-for-config"
+                        },
+                        "exec": {
+                            "$ref": "#/definitions/stage-exec"
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "exit": {
+                    "type": "object",
+                    "description": "create stage configuration",
+                    "properties": {
+                        "wait-for": {
+                            "$ref": "#/definitions/wait-for-config"
+                        },
+                        "exec": {
+                            "$ref": "#/definitions/stage-exec"
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        },
+        "wait-for-config": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "node": {
+                        "type": "string",
+                        "description": "node name to wait for"
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "phase to wait for",
+                        "$ref": "#/definitions/stages-enum"
+                    }
+                },
+                "additionalProperties": false
+            },
+            "uniqueItems": true,
+            "description": "Dependency list for the node",
+            "markdownDescription": "Dependency list for the node"
+        },
+        "stages-enum": {
+            "type": "string",
+            "enum": [
+                "create",
+                "create-links",
+                "configure",
+                "healthy",
+                "exit"
+            ]
+        },
+        "stage-exec": {
+            "type": "object",
+            "description": "per-stage exec configuration",
+            "properties": {
+                "on-enter": {
+                    "$ref": "#/definitions/stage-exec-list"
+                },
+                "on-exit": {
+                    "$ref": "#/definitions/stage-exec-list"
+                }
+            }
+        },
+        "stage-exec-list": {
+            "type": "array",
+            "description": "list of commands to execute",
+            "markdownDescription": "list of [commands to execute](https://containerlab.dev/manual/nodes/#exec)",
+            "minItems": 1,
+            "items": {
+                "type": "string"
+            }
         }
     },
     "type": "object",
@@ -712,10 +902,10 @@
                         "vr-vsrx": {
                             "$ref": "#/definitions/node-config"
                         },
-                        "vr-juniper_vjunosswitch": {
+                        "juniper_vjunosswitch": {
                             "$ref": "#/definitions/node-config"
                         },
-                        "vr-vjunosswitch": {
+                        "juniper_vjunosevolved": {
                             "$ref": "#/definitions/node-config"
                         },
                         "vr-aruba_aoscx": {
@@ -746,6 +936,9 @@
                             "$ref": "#/definitions/node-config"
                         },
                         "vr-csr": {
+                            "$ref": "#/definitions/node-config"
+                        },
+                        "cisco_ftdv": {
                             "$ref": "#/definitions/node-config"
                         },
                         "linux": {
@@ -788,6 +981,12 @@
                             "$ref": "#/definitions/node-config"
                         },
                         "cumulus_cvx": {
+                            "$ref": "#/definitions/node-config"
+                        },
+                        "openbsd": {
+                            "$ref": "#/definitions/node-config"
+                        },
+                        "freebsd": {
                             "$ref": "#/definitions/node-config"
                         }
                     }

@@ -6,6 +6,30 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/clab/exec"
+	"golang.org/x/mod/semver"
+)
+
+const (
+	snmpv2Config = `set / system snmp access-group SNMPv2-RO-Community security-level no-auth-no-priv community-entry RO-Community community public
+set / system snmp network-instance mgmt admin-state enable`
+
+	snmpv2ConfigPre24_3 = `set / system snmp community public
+set / system snmp network-instance mgmt admin-state enable`
+
+	// grpcConfigPre24_3 contains the gnmi server configuration for srlinux versions < 24.3.
+	grpcConfigPre24_3 = `set / system gnmi-server admin-state enable network-instance mgmt admin-state enable tls-profile clab-profile
+set / system gnmi-server rate-limit 65000
+set / system gnmi-server trace-options [ request response common ]
+set / system gnmi-server unix-socket admin-state enable`
+
+	// grpc contains the grpc server(s) configuration for srlinux versions >= 24.3.
+	grpcConfig = `set / system grpc-server clab services [ gnmi gnoi gribi p4rt ]
+set / system grpc-server clab tls-profile clab-profile
+set / system grpc-server clab rate-limit 65000
+set / system grpc-server clab network-instance mgmt
+set / system grpc-server clab trace-options [ request response common ]
+set / system grpc-server clab unix-socket admin-state enable
+set / system grpc-server clab admin-state enable`
 )
 
 // SrlVersion represents an sr linux version as a set of fields.
@@ -49,4 +73,37 @@ func (n *srl) parseVersionString(s string) *SrlVersion {
 // String returns a string representation of the version in a semver fashion (with leading v).
 func (v *SrlVersion) String() string {
 	return "v" + v.major + "." + v.minor + "." + v.patch + "-" + v.build + "-" + v.commit
+}
+
+// MajorMinorSemverString returns a string representation of the major.minor version with a leading v.
+func (v *SrlVersion) MajorMinorSemverString() string {
+	return "v" + v.major + "." + v.minor
+}
+
+// setVersionSpecificParams sets version specific parameters in the template data struct
+// to enable/disable version-specific configuration blocks in the config template
+// or prepares data to conform to the expected format per specific version.
+func (n *srl) setVersionSpecificParams(tplData *srlTemplateData) {
+	// v is in the vMajor.Minor format
+	v := n.swVersion.MajorMinorSemverString()
+
+	// in srlinux >= v23.10+ linuxadmin and admin user ssh keys can only be configured via the cli
+	// so we add the keys to the template data for rendering.
+	if len(n.sshPubKeys) > 0 && (semver.Compare(v, "v23.10") >= 0 || n.swVersion.major == "0") {
+		tplData.SSHPubKeys = catenateKeys(n.sshPubKeys)
+	}
+
+	// in srlinux v23.10.x we need to enable GNMI unix socket services to enable
+	// communications over unix socket (e.g. NDK agents)
+	if semver.Compare(v, "v23.10") == 0 {
+		tplData.EnableGNMIUnixSockServices = true
+	}
+
+	// in versions < v24.3 (or non 0.0 versions) we have to use the version specific
+	// config for grpc and snmpv2
+	if semver.Compare(v, "v24.3") == -1 && n.swVersion.major != "0" {
+		tplData.SNMPConfig = snmpv2ConfigPre24_3
+
+		tplData.GRPCConfig = grpcConfigPre24_3
+	}
 }

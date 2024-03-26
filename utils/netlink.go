@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
+	"github.com/jsimonetti/rtnetlink/rtnl"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
@@ -40,34 +42,6 @@ func LinkContainerNS(nspath, containerName string) error {
 		return err
 	}
 	return nil
-}
-
-func CheckBrInUse(brname string) (bool, error) {
-	InUse := false
-	l, err := netlink.LinkList()
-	if err != nil {
-		return InUse, err
-	}
-	mgmtbr, err := netlink.LinkByName(brname)
-	if err != nil {
-		return InUse, err
-	}
-	mgmtbridx := mgmtbr.Attrs().Index
-	for _, link := range l {
-		if link.Attrs().MasterIndex == mgmtbridx {
-			InUse = true
-			break
-		}
-	}
-	return InUse, nil
-}
-
-func DeleteLinkByName(name string) error {
-	l, err := netlink.LinkByName(name)
-	if err != nil {
-		return err
-	}
-	return netlink.LinkDel(l)
 }
 
 // GenMac generates a random MAC address for a given OUI.
@@ -127,4 +101,39 @@ func FirstLinkIPs(ln string) (v4, v6 string, err error) {
 	}
 
 	return v4, v6, err
+}
+
+// GetLinksByNamePrefix returns a list of links whose name matches a prefix.
+func GetLinksByNamePrefix(prefix string) ([]netlink.Link, error) {
+	// filtered list of interfaces
+	if prefix == "" {
+		return nil, fmt.Errorf("prefix is not specified")
+	}
+	var fls []netlink.Link
+
+	ls, err := netlink.LinkList()
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range ls {
+		if strings.HasPrefix(l.Attrs().Name, prefix) {
+			fls = append(fls, l)
+		}
+	}
+	if len(fls) == 0 {
+		return nil, fmt.Errorf("no links found by specified prefix %s", prefix)
+	}
+	return fls, nil
+}
+
+func GetRouteForIP(ip net.IP) (*rtnl.Route, error) {
+	conn, err := rtnl.Dial(nil)
+	if err != nil {
+		return nil, fmt.Errorf("can't establish netlink connection: %s", err)
+	}
+	defer conn.Close()
+
+	r, err := conn.RouteGet(ip)
+
+	return r, err
 }

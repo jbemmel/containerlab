@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"text/template"
 
@@ -35,13 +36,13 @@ type DefaultNode struct {
 	Mgmt             *types.MgmtNet
 	Runtime          runtime.ContainerRuntime
 	HostRequirements *types.HostRequirements
+	// SSHConfig is the SSH client configuration that a clab node requires.
+	SSHConfig *types.SSHConfig
 	// Indicates that the node should not start without no license file defined
 	LicensePolicy types.LicensePolicy
 	// OverwriteNode stores the interface used to overwrite methods defined
 	// for DefaultNode, so that particular nodes can provide custom implementations.
 	OverwriteNode NodeOverwrites
-	// List of links that reference the node.
-	Links []links.Link
 	// List of link endpoints that are connected to the node.
 	Endpoints []links.Endpoint
 	// State of the node
@@ -57,6 +58,7 @@ func NewDefaultNode(n NodeOverwrites) *DefaultNode {
 		HostRequirements: types.NewHostRequirements(),
 		OverwriteNode:    n,
 		LicensePolicy:    types.LicensePolicyNone,
+		SSHConfig:        types.NewSSHConfig(),
 	}
 
 	return dn
@@ -128,21 +130,59 @@ func (d *DefaultNode) VerifyHostRequirements() error {
 }
 
 func (d *DefaultNode) Deploy(ctx context.Context, _ *DeployParams) error {
+	// Set the "CLAB_INTFS" variable to the number of interfaces
+	// Which is required by vrnetlab to determine if all configured interfaces are present
+	// such that the internal VM can be started with these interfaces assigned.
+	d.Config().Env[types.CLAB_ENV_INTFS] = strconv.Itoa(len(d.GetEndpoints()))
+
+	// create the container
 	cID, err := d.Runtime.CreateContainer(ctx, d.Cfg)
 	if err != nil {
 		return err
 	}
+
+	// start the container
 	_, err = d.Runtime.StartContainer(ctx, cID, d)
 	if err != nil {
 		return err
 	}
 
+	// Update the nodes state
 	d.SetState(state.Deployed)
 
 	return nil
 }
 
+// getNsPath retrieve the nodes nspath.
+func (d *DefaultNode) getNsPath(ctx context.Context) (string, error) {
+	var err error
+	nsp := ""
+
+	if d.Cfg.IsRootNamespaceBased {
+		netns, err := ns.GetCurrentNS()
+		if err != nil {
+			return "", err
+		}
+		nsp = netns.Path()
+	}
+	if nsp == "" {
+		nsp, err = d.Runtime.GetNSPath(ctx, d.Cfg.LongName)
+		if err != nil {
+			log.Errorf("Unable to determine NetNS Path for node %s: %v", d.Cfg.ShortName, err)
+			return "", err
+		}
+	}
+
+	return nsp, err
+}
+
 func (d *DefaultNode) Delete(ctx context.Context) error {
+	for _, e := range d.Endpoints {
+		err := e.GetLink().Remove(ctx)
+		if err != nil {
+			return err
+		}
+	}
 	return d.Runtime.DeleteContainer(ctx, d.OverwriteNode.GetContainerName())
 }
 
@@ -156,7 +196,7 @@ func (d *DefaultNode) GetContainers(ctx context.Context) ([]runtime.GenericConta
 	cnts, err := d.Runtime.ListContainers(ctx, []*types.GenericFilter{
 		{
 			FilterType: "name",
-			Match:      fmt.Sprintf("^%s$", d.OverwriteNode.GetContainerName()), // this regexp ensure we have an exact match for name
+			Match:      d.OverwriteNode.GetContainerName(),
 		},
 	})
 	if err != nil {
@@ -169,6 +209,24 @@ func (d *DefaultNode) GetContainers(ctx context.Context) ([]runtime.GenericConta
 	}
 
 	return cnts, err
+}
+
+func (d *DefaultNode) RunExecFromConfig(ctx context.Context, ec *exec.ExecCollection) error {
+	for _, e := range d.Config().Exec {
+		exec, err := exec.NewExecCmdFromString(e)
+		if err != nil {
+			log.Warnf("Failed to parse the command string: %s, %v", e, err)
+		}
+
+		res, err := d.OverwriteNode.RunExec(ctx, exec)
+		if err != nil {
+			// kinds which do not support exec functionality are skipped
+			continue
+		}
+
+		ec.Add(d.GetShortName(), res)
+	}
+	return nil
 }
 
 func (d *DefaultNode) UpdateConfigWithRuntimeInfo(ctx context.Context) error {
@@ -289,6 +347,7 @@ type NodeOverwrites interface {
 	GetContainers(ctx context.Context) ([]runtime.GenericContainer, error)
 	GetContainerName() string
 	VerifyLicenseFileExists(context.Context) error
+	RunExec(context.Context, *exec.ExecCmd) (*exec.ExecResult, error)
 }
 
 // LoadStartupConfigFileVr templates a startup-config using the file specified for VM-based nodes in the topo
@@ -368,8 +427,9 @@ func (d *DefaultNode) VerifyLicenseFileExists(_ context.Context) error {
 	// if license is provided check path exists
 	rlic := utils.ResolvePath(d.Config().License, d.Cfg.LabDir)
 	if !utils.FileExists(rlic) {
-		return fmt.Errorf("license file of node %q not found by the path %s", d.Config().ShortName, rlic)
+		return fmt.Errorf("license file for node %q is not found by the path %s", d.Config().ShortName, rlic)
 	}
+
 	return nil
 }
 
@@ -393,7 +453,15 @@ func (d *DefaultNode) LoadOrGenerateCertificate(certInfra *cert.Cert, topoName s
 			nodeConfig.LongName,
 			nodeConfig.ShortName + "." + topoName + ".io",
 		}
-		hosts = append(hosts, nodeConfig.SANs...)
+		// add the SANs provided via config
+		hosts = append(hosts, nodeConfig.Certificate.SANs...)
+
+		// add mgmt IPs as SANs to CSR
+		for _, ip := range []string{d.Cfg.MgmtIPv4Address, d.Cfg.MgmtIPv6Address} {
+			if ip != "" {
+				hosts = append(hosts, ip)
+			}
+		}
 
 		certInput := &cert.NodeCSRInput{
 			CommonName:   nodeConfig.ShortName + "." + topoName + ".io",
@@ -419,9 +487,14 @@ func (d *DefaultNode) LoadOrGenerateCertificate(certInfra *cert.Cert, topoName s
 	return nodeCert, nil
 }
 
-func (d *DefaultNode) AddLinkToContainer(_ context.Context, link netlink.Link, f func(ns.NetNS) error) error {
+func (d *DefaultNode) AddLinkToContainer(ctx context.Context, link netlink.Link, f func(ns.NetNS) error) error {
+	// retrieve nodes nspath
+	nsp, err := d.getNsPath(ctx)
+	if err != nil {
+		return err
+	}
 	// retrieve the namespace handle
-	netns, err := ns.GetNS(d.Cfg.NSPath)
+	netns, err := ns.GetNS(nsp)
 	if err != nil {
 		return err
 	}
@@ -430,12 +503,20 @@ func (d *DefaultNode) AddLinkToContainer(_ context.Context, link netlink.Link, f
 		return err
 	}
 	// execute the given function
-	return netns.Do(f)
+	err = netns.Do(f)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // ExecFunction executes the given function in the nodes network namespace.
-func (d *DefaultNode) ExecFunction(f func(ns.NetNS) error) error {
-	nspath := d.Cfg.NSPath
+func (d *DefaultNode) ExecFunction(ctx context.Context, f func(ns.NetNS) error) error {
+	// retrieve nodes nspath
+	nspath, err := d.getNsPath(ctx)
+	if err != nil {
+		return err
+	}
 
 	if d.Cfg.IsRootNamespaceBased {
 		nshandle, err := ns.GetCurrentNS()
@@ -458,10 +539,6 @@ func (d *DefaultNode) ExecFunction(f func(ns.NetNS) error) error {
 	return netns.Do(f)
 }
 
-func (d *DefaultNode) AddLink(l links.Link) {
-	d.Links = append(d.Links, l)
-}
-
 func (d *DefaultNode) AddEndpoint(e links.Endpoint) {
 	d.Endpoints = append(d.Endpoints, e)
 }
@@ -472,7 +549,7 @@ func (d *DefaultNode) GetEndpoints() []links.Endpoint {
 
 // GetLinkEndpointType returns a veth link endpoint type for default nodes.
 // The LinkEndpointTypeVeth indicates a veth endpoint which doesn't require special handling.
-func (d *DefaultNode) GetLinkEndpointType() links.LinkEndpointType {
+func (*DefaultNode) GetLinkEndpointType() links.LinkEndpointType {
 	return links.LinkEndpointTypeVeth
 }
 
@@ -480,10 +557,11 @@ func (d *DefaultNode) GetShortName() string {
 	return d.Cfg.ShortName
 }
 
-// DeployLinks deploys links associated with the node.
-func (d *DefaultNode) DeployLinks(ctx context.Context) error {
-	for _, l := range d.Links {
-		err := l.Deploy(ctx)
+// DeployEndpoints deploys endpoints associated with the node.
+// The deployment of endpoints is done by deploying a link with the endpoint triggering it.
+func (d *DefaultNode) DeployEndpoints(ctx context.Context) error {
+	for _, ep := range d.Endpoints {
+		err := ep.Deploy(ctx)
 		if err != nil {
 			return err
 		}
@@ -502,4 +580,16 @@ func (d *DefaultNode) SetState(s state.NodeState) {
 	d.statemutex.Lock()
 	defer d.statemutex.Unlock()
 	d.state = s
+}
+
+func (d *DefaultNode) GetSSHConfig() *types.SSHConfig {
+	return d.SSHConfig
+}
+
+func (d *DefaultNode) GetContainerStatus(ctx context.Context) runtime.ContainerStatus {
+	return d.Runtime.GetContainerStatus(ctx, d.GetContainerName())
+}
+
+func (d *DefaultNode) IsHealthy(ctx context.Context) (bool, error) {
+	return d.Runtime.IsHealthy(ctx, d.GetContainerName())
 }

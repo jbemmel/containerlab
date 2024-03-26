@@ -11,7 +11,7 @@ topology:
       image: alpine:3
       cmd: ash -c "echo $MYVAR > /tmp/var && sleep 9999"
       binds:
-        - /tmp/clab-01-test.txt:/01-test.txt
+        - 01-test.txt:/01-test.txt
         - 01-test.json:/test.json
       env:
         MYVAR: MYVAR is SET
@@ -22,6 +22,14 @@ topology:
       memory: 1G
       mgmt_ipv4: 172.20.20.99 # test deprecated mgmt_ipv4 still works
       mgmt_ipv6: 2001:172:20:20::99 # test deprecated mgmt_ipv6 still works
+      healthcheck:
+        test:
+          - CMD-SHELL
+          - cat /etc/os-release
+        start-period: 3
+        retries: 1
+        interval: 5
+        timeout: 2
     l2:
       kind: linux
       image: nginx:stable-alpine
@@ -44,7 +52,7 @@ topology:
 
   links:
     - endpoints: ["l1:eth1", "l2:some1"]
-      mtu: 1500
+      mtu: 2000
       vars:
         foo: bar
         some: ["thing", "else"]

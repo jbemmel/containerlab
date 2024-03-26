@@ -60,6 +60,8 @@ type ContainerRuntime interface {
 	GetHostsPath(context.Context, string) (string, error)
 	// GetContainerStatus retrieves the ContainerStatus of the named container
 	GetContainerStatus(ctx context.Context, cID string) ContainerStatus
+	// IsHealthy returns true is the container is reported as being healthy, false otherwise
+	IsHealthy(ctx context.Context, cID string) (bool, error)
 }
 
 type ContainerStatus string
@@ -111,7 +113,7 @@ func WaitForContainerRunning(ctx context.Context, r ContainerRuntime, contName, 
 	// how long to wait for the external container to become running
 	statusCheckTimeout := 15 * time.Minute
 	// frequency to check for new container state
-	statusCheckFrequency := time.Second
+	statusCheckFrequency := 3 * time.Second
 
 	// setup a ticker
 	ticker := time.NewTicker(statusCheckFrequency)

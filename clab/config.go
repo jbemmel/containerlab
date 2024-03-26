@@ -29,8 +29,6 @@ const (
 	dockerNetName     = "clab"
 	dockerNetIPv4Addr = "172.20.20.0/24"
 	dockerNetIPv6Addr = "2001:172:20:20::/64"
-	// NSPath value assigned to host interfaces.
-	hostNSPath = "__host"
 	// veth link mtu.
 	DefaultVethLinkMTU = 9500
 
@@ -55,7 +53,7 @@ type Config struct {
 func (c *CLab) parseTopology() error {
 	log.Infof("Parsing & checking topology file: %s", c.TopoPaths.TopologyFilenameBase())
 
-	err := c.TopoPaths.SetLabDir(c.Config.Name)
+	err := c.TopoPaths.SetLabDirByPrefix(c.Config.Name)
 	if err != nil {
 		return err
 	}
@@ -93,7 +91,7 @@ func (c *CLab) parseTopology() error {
 		}
 
 		// saving the global default runtime
-		nodeRuntimes[nodeName] = c.globalRuntime
+		nodeRuntimes[nodeName] = c.globalRuntimeName
 	}
 
 	// initialize any extra runtimes
@@ -106,7 +104,7 @@ func (c *CLab) parseTopology() error {
 		if rInit, ok := clabRuntimes.ContainerRuntimes[r]; ok {
 
 			newRuntime := rInit()
-			defaultConfig := c.Runtimes[c.globalRuntime].Config()
+			defaultConfig := c.Runtimes[c.globalRuntimeName].Config()
 			err := newRuntime.Init(
 				clabRuntimes.WithConfig(&defaultConfig),
 			)
@@ -199,14 +197,17 @@ func (c *CLab) createNodeCfg(nodeName string, nodeDef *types.NodeDefinition, idx
 		Memory:          c.Config.Topology.GetNodeMemory(nodeName),
 		StartupDelay:    c.Config.Topology.GetNodeStartupDelay(nodeName),
 		AutoRemove:      c.Config.Topology.GetNodeAutoRemove(nodeName),
-		SANs:            c.Config.Topology.GetSANs(nodeName),
 		Extras:          c.Config.Topology.GetNodeExtras(nodeName),
-		WaitFor:         c.Config.Topology.GetWaitFor(nodeName),
 		DNS:             c.Config.Topology.GetNodeDns(nodeName),
 		Certificate:     c.Config.Topology.GetCertificateConfig(nodeName),
+		Healthcheck:     c.Config.Topology.GetHealthCheckConfig(nodeName),
 	}
-
 	var err error
+
+	nodeCfg.Stages, err = c.Config.Topology.GetStages(nodeName)
+	if err != nil {
+		return nil, err
+	}
 
 	// Load content of the EnvVarFiles
 	envFileContent, err := utils.LoadEnvVarFiles(c.TopoPaths.TopologyFileDir(),
@@ -266,13 +267,9 @@ func (c *CLab) processStartupConfig(nodeCfg *types.NodeConfig) error {
 	// it contains at least one newline
 	isEmbeddedConfig := strings.Count(p, "\n") >= 1
 	// downloadable config starts with http(s)://
-	isDownloadableConfig := utils.IsHttpUri(p)
+	isDownloadableConfig := utils.IsHttpURL(p, false)
 
 	if isEmbeddedConfig || isDownloadableConfig {
-		// both embedded and downloadable configs are require clab tmp dir to be created
-		tmpLoc := c.TopoPaths.ClabTmpDir()
-		utils.CreateDirectory(tmpLoc, 0755)
-
 		switch {
 		case isEmbeddedConfig:
 			log.Debugf("Node %q startup-config is an embedded config: %q", nodeCfg.ShortName, p)
@@ -313,11 +310,11 @@ func (c *CLab) processStartupConfig(nodeCfg *types.NodeConfig) error {
 	return nil
 }
 
-// CheckTopologyDefinition runs topology checks and returns any errors found.
+// checkTopologyDefinition runs topology checks and returns any errors found.
 // This function runs after topology file is parsed and all nodes/links are initialized.
-func (c *CLab) CheckTopologyDefinition(ctx context.Context) error {
+func (c *CLab) checkTopologyDefinition(ctx context.Context) error {
 	var err error
-	if err = c.verifyLinks(); err != nil {
+	if err = c.verifyLinks(ctx); err != nil {
 		return err
 	}
 	if err = c.verifyRootNetNSLinks(); err != nil {
@@ -332,7 +329,7 @@ func (c *CLab) CheckTopologyDefinition(ctx context.Context) error {
 	if err = c.verifyDuplicateAddresses(); err != nil {
 		return err
 	}
-	if err = c.VerifyContainersUniqueness(ctx); err != nil {
+	if err = c.verifyContainersUniqueness(ctx); err != nil {
 		return err
 	}
 	return nil
@@ -375,11 +372,11 @@ func (c *CLab) verifyRootNetNSLinks() error {
 
 // verifyLinks checks if all the endpoints in the links section of the topology file
 // appear only once.
-func (c *CLab) verifyLinks() error {
+func (c *CLab) verifyLinks(ctx context.Context) error {
 	var err error
 	verificationErrors := []error{}
 	for _, e := range c.Endpoints {
-		err = e.Verify(c.GlobalRuntime().Config().VerifyLinkParams)
+		err = e.Verify(ctx, c.globalRuntime().Config().VerifyLinkParams)
 		if err != nil {
 			verificationErrors = append(verificationErrors, err)
 		}
@@ -391,7 +388,7 @@ func (c *CLab) verifyLinks() error {
 }
 
 // LoadKernelModules loads containerlab-required kernel modules.
-func (c *CLab) LoadKernelModules() error {
+func (c *CLab) loadKernelModules() error {
 	modules := []string{"ip_tables", "ip6_tables"}
 
 	for _, m := range modules {
@@ -452,9 +449,9 @@ func (c *CLab) verifyDuplicateAddresses() error {
 	return nil
 }
 
-// VerifyContainersUniqueness ensures that nodes defined in the topology do not have names of the existing containers
+// verifyContainersUniqueness ensures that nodes defined in the topology do not have names of the existing containers
 // additionally it checks that the lab name is unique and no containers are currently running with the same lab name label.
-func (c *CLab) VerifyContainersUniqueness(ctx context.Context) error {
+func (c *CLab) verifyContainersUniqueness(ctx context.Context) error {
 	nctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -503,6 +500,11 @@ func (c *CLab) resolveBindPaths(binds []string, nodedir string) error {
 		// host path is a first element in a /hostpath:/remotepath(:options) string
 		elems := strings.Split(binds[i], ":")
 
+		if len(elems) == 1 {
+			// if there is only one element, it means that we have an anonymous
+			// volume, in this case we don't need to resolve the path
+			continue
+		}
 		// replace special variable
 		r := strings.NewReplacer(clabDirVar, c.TopoPaths.TopologyLabDir(), nodeDirVar, nodedir)
 		hp := r.Replace(elems[0])
@@ -523,31 +525,6 @@ func (c *CLab) resolveBindPaths(binds []string, nodedir string) error {
 	}
 
 	return nil
-}
-
-// setClabIntfsEnvVar sets CLAB_INTFS env var for each node
-// which holds the number of interfaces a node expects to have (without mgmt interfaces).
-func (c *CLab) SetClabIntfsEnvVar() {
-	for _, n := range c.Nodes {
-		// Injecting the env var with expected number of links
-		numIntfs := map[string]string{
-			types.CLAB_ENV_INTFS: fmt.Sprintf("%d", len(n.GetEndpoints())),
-		}
-		n.Config().Env = utils.MergeStringMaps(n.Config().Env, numIntfs)
-	}
-}
-
-// returns nodeCfg.ShortName based on the provided containerName and labName.
-func getShortName(labName string, labPrefix *string, containerName string) (string, error) {
-	if *labPrefix == "" {
-		return containerName, nil
-	}
-
-	result := strings.Split(containerName, "-"+labName+"-")
-	if len(result) != 2 {
-		return "", fmt.Errorf("failed to parse container name %q", containerName)
-	}
-	return result[1], nil
 }
 
 // HasKind returns true if kind k is found in the list of nodes.

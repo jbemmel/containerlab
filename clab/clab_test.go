@@ -9,52 +9,17 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
 	errs "github.com/srl-labs/containerlab/errors"
-	"github.com/srl-labs/containerlab/mocks"
 	"github.com/srl-labs/containerlab/mocks/mocknodes"
 	"github.com/srl-labs/containerlab/mocks/mockruntime"
 	"github.com/srl-labs/containerlab/nodes"
 	"github.com/srl-labs/containerlab/runtime"
 	_ "github.com/srl-labs/containerlab/runtime/all"
 	"github.com/srl-labs/containerlab/types"
+	"go.uber.org/mock/gomock"
 	"golang.org/x/exp/slices"
 )
-
-func Test_createNamespaceSharingDependencyOne(t *testing.T) {
-	mockCtrl := gomock.NewController(t)
-	defer mockCtrl.Finish()
-
-	// instantiate a dependencyManager mock
-	dm := mocks.NewMockDependencyManager(mockCtrl)
-
-	// retrieve a map of nodes
-	nodeMap := getNodeMap(mockCtrl)
-
-	dm.EXPECT().AddDependency("node2", "node3")
-	createNamespaceSharingDependency(nodeMap, dm)
-}
-
-func Test_createStaticDynamicDependency(t *testing.T) {
-	mockCtrl := gomock.NewController(t)
-	defer mockCtrl.Finish()
-
-	// instantiate a dependencyManager mock
-	dm := mocks.NewMockDependencyManager(mockCtrl)
-
-	// retrieve a map of nodes
-	nodeMap := getNodeMap(mockCtrl)
-
-	dm.EXPECT().AddDependency("node4", "node1")
-	dm.EXPECT().AddDependency("node4", "node2")
-	dm.EXPECT().AddDependency("node4", "node3")
-	dm.EXPECT().AddDependency("node5", "node1")
-	dm.EXPECT().AddDependency("node5", "node2")
-	dm.EXPECT().AddDependency("node5", "node3")
-
-	createStaticDynamicDependency(nodeMap, dm)
-}
 
 // getNodeMap return a map of nodes for testing purpose.
 func getNodeMap(mockCtrl *gomock.Controller) map[string]nodes.Node {
@@ -64,6 +29,7 @@ func getNodeMap(mockCtrl *gomock.Controller) map[string]nodes.Node {
 		&types.NodeConfig{
 			Image:     "alpine:3",
 			ShortName: "node1",
+			Stages:    types.NewStages(),
 		},
 	).AnyTimes()
 
@@ -73,7 +39,30 @@ func getNodeMap(mockCtrl *gomock.Controller) map[string]nodes.Node {
 		&types.NodeConfig{
 			Image:     "alpine:3",
 			ShortName: "node2",
-			WaitFor:   []string{"node1"},
+			Stages: &types.Stages{
+				Create: &types.StageCreate{
+					StageBase: types.StageBase{
+						WaitFor: types.WaitForList{
+							&types.WaitFor{
+								Node:  "node1",
+								Stage: types.WaitForCreate,
+							},
+						},
+					},
+				},
+				CreateLinks: &types.StageCreateLinks{
+					StageBase: types.StageBase{},
+				},
+				Configure: &types.StageConfigure{
+					StageBase: types.StageBase{},
+				},
+				Healthy: &types.StageHealthy{
+					StageBase: types.StageBase{},
+				},
+				Exit: &types.StageExit{
+					StageBase: types.StageBase{},
+				},
+			},
 		},
 	).AnyTimes()
 
@@ -84,7 +73,34 @@ func getNodeMap(mockCtrl *gomock.Controller) map[string]nodes.Node {
 			Image:       "alpine:3",
 			NetworkMode: "container:node2",
 			ShortName:   "node3",
-			WaitFor:     []string{"node1", "node2"},
+			Stages: &types.Stages{
+				Create: &types.StageCreate{
+					StageBase: types.StageBase{
+						WaitFor: types.WaitForList{
+							&types.WaitFor{
+								Node:  "node1",
+								Stage: types.WaitForCreate,
+							},
+							&types.WaitFor{
+								Node:  "node2",
+								Stage: types.WaitForCreate,
+							},
+						},
+					},
+				},
+				CreateLinks: &types.StageCreateLinks{
+					StageBase: types.StageBase{},
+				},
+				Configure: &types.StageConfigure{
+					StageBase: types.StageBase{},
+				},
+				Healthy: &types.StageHealthy{
+					StageBase: types.StageBase{},
+				},
+				Exit: &types.StageExit{
+					StageBase: types.StageBase{},
+				},
+			},
 		},
 	).AnyTimes()
 
@@ -96,6 +112,7 @@ func getNodeMap(mockCtrl *gomock.Controller) map[string]nodes.Node {
 			MgmtIPv4Address: "172.10.10.1",
 			ShortName:       "node4",
 			NetworkMode:     "container:foobar",
+			Stages:          types.NewStages(),
 		},
 	).AnyTimes()
 
@@ -106,7 +123,34 @@ func getNodeMap(mockCtrl *gomock.Controller) map[string]nodes.Node {
 			Image:           "alpine:3",
 			MgmtIPv4Address: "172.10.10.2",
 			ShortName:       "node5",
-			WaitFor:         []string{"node3", "node4"},
+			Stages: &types.Stages{
+				Create: &types.StageCreate{
+					StageBase: types.StageBase{
+						WaitFor: types.WaitForList{
+							&types.WaitFor{
+								Node:  "node3",
+								Stage: types.WaitForCreate,
+							},
+							&types.WaitFor{
+								Node:  "node4",
+								Stage: types.WaitForCreate,
+							},
+						},
+					},
+				},
+				CreateLinks: &types.StageCreateLinks{
+					StageBase: types.StageBase{},
+				},
+				Configure: &types.StageConfigure{
+					StageBase: types.StageBase{},
+				},
+				Healthy: &types.StageHealthy{
+					StageBase: types.StageBase{},
+				},
+				Exit: &types.StageExit{
+					StageBase: types.StageBase{},
+				},
+			},
 		},
 	).AnyTimes()
 
@@ -121,28 +165,6 @@ func getNodeMap(mockCtrl *gomock.Controller) map[string]nodes.Node {
 	}
 
 	return nodeMap
-}
-
-func Test_createWaitForDependency(t *testing.T) {
-	mockCtrl := gomock.NewController(t)
-	defer mockCtrl.Finish()
-
-	// instantiate a dependencyManager mock
-	dm := mocks.NewMockDependencyManager(mockCtrl)
-
-	// retrieve a map of nodes
-	nodeMap := getNodeMap(mockCtrl)
-
-	dm.EXPECT().AddDependency("node1", "node2")
-	dm.EXPECT().AddDependency("node1", "node3")
-	dm.EXPECT().AddDependency("node2", "node3")
-	dm.EXPECT().AddDependency("node3", "node5")
-	dm.EXPECT().AddDependency("node4", "node5")
-
-	err := createWaitForDependency(nodeMap, dm)
-	if err != nil {
-		t.Error(err)
-	}
 }
 
 func Test_WaitForExternalNodeDependencies_OK(t *testing.T) {
@@ -170,15 +192,15 @@ func Test_WaitForExternalNodeDependencies_OK(t *testing.T) {
 
 	// create a barebone CLab struct
 	c := CLab{
-		Nodes:         getNodeMap(mockCtrl),
-		globalRuntime: "mock",
+		Nodes:             getNodeMap(mockCtrl),
+		globalRuntimeName: "mock",
 		Runtimes: map[string]runtime.ContainerRuntime{
 			"mock": crMock,
 		},
 	}
 
 	// run the check
-	c.WaitForExternalNodeDependencies(ctx, "node4")
+	c.waitForExternalNodeDependencies(ctx, "node4")
 
 	// check that the function was called "counterMax" times
 	if counter != counterMax {
@@ -196,7 +218,7 @@ func Test_WaitForExternalNodeDependencies_NoContainerNetworkMode(t *testing.T) {
 	}
 
 	// run the check with a node that has no "network-mode: container:<CONTAINERNAME>"
-	c.WaitForExternalNodeDependencies(context.TODO(), "node5")
+	c.waitForExternalNodeDependencies(context.TODO(), "node5")
 	// should simply and quickly return
 }
 
@@ -210,7 +232,7 @@ func Test_WaitForExternalNodeDependencies_NodeNonExisting(t *testing.T) {
 	}
 
 	// run the check with a node that has no "network-mode: container:<CONTAINERNAME>"
-	c.WaitForExternalNodeDependencies(context.TODO(), "NonExistingNode")
+	c.waitForExternalNodeDependencies(context.TODO(), "NonExistingNode")
 	// should simply and quickly return
 }
 

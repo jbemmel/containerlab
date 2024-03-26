@@ -9,10 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/docker/go-connections/nat"
 	log "github.com/sirupsen/logrus"
-	"github.com/srl-labs/containerlab/utils"
 	"gopkg.in/yaml.v2"
 )
 
@@ -55,7 +53,7 @@ type MgmtNet struct {
 	IPv6Subnet     string `yaml:"ipv6-subnet,omitempty" json:"ipv6-subnet,omitempty"`
 	IPv6Gw         string `yaml:"ipv6-gw,omitempty" json:"ipv6-gw,omitempty"`
 	IPv6Range      string `yaml:"ipv6-range,omitempty" json:"ipv6-range,omitempty"`
-	MTU            string `yaml:"mtu,omitempty" json:"mtu,omitempty"`
+	MTU            int    `yaml:"mtu,omitempty" json:"mtu,omitempty"`
 	ExternalAccess *bool  `yaml:"external-access,omitempty" json:"external-access,omitempty"`
 }
 
@@ -95,7 +93,7 @@ func (m *MgmtNet) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
-// NodeConfig is a struct that contains the information of a container element.
+// NodeConfig contains information of a container element.
 type NodeConfig struct {
 	// name of the Node inside topology YAML
 	ShortName string `json:"shortname,omitempty"`
@@ -162,14 +160,14 @@ type NodeConfig struct {
 	TLSAnchor            string `json:"tls-anchor,omitempty"`
 	// TLS Certificate configuration
 	Certificate *CertificateConfig
-	NSPath      string `json:"nspath,omitempty"` // network namespace path for this node
+	// Healthcheck configuration parameters
+	Healthcheck *HealthcheckConfig
+	// NSPath      string `json:"nspath,omitempty"` // network namespace path for this node
 	// list of ports to publish with mysocketctl
 	Publish []string `json:"publish,omitempty"`
 	// Extra /etc/hosts entries for all nodes.
 	ExtraHosts []string          `json:"extra-hosts,omitempty"`
 	Labels     map[string]string `json:"labels,omitempty"` // container labels
-	// List of Subject Alternative Names (SAN) to be added to the node's TLS certificate
-	SANs []string `json:"SANs,omitempty"`
 	// Ignite sandbox and kernel imageNames
 	Sandbox string `json:"sandbox,omitempty"`
 	Kernel  string `json:"kernel,omitempty"`
@@ -181,12 +179,11 @@ type NodeConfig struct {
 	Memory string  `json:"memory,omitempty"`
 
 	// Extra node parameters
-	Extras  *Extras    `json:"extras,omitempty"`
-	WaitFor []string   `json:"wait-for,omitempty"`
-	DNS     *DNSConfig `json:"dns,omitempty"`
-
+	Extras *Extras    `json:"extras,omitempty"`
+	Stages *Stages    `json:"stages,omitempty"`
+	DNS    *DNSConfig `json:"dns,omitempty"`
 	// Kind parameters
-	////////////////////
+	//
 	// IsRootNamespaceBased flag indicates that a certain nodes network
 	// namespace (usually based on the kind) is the root network namespace
 	IsRootNamespaceBased bool
@@ -195,27 +192,6 @@ type NodeConfig struct {
 	// Introduced to prevent the check from running with ext-containers, since
 	// they should be present by definition.
 	SkipUniquenessCheck bool
-}
-
-func DisableTxOffload(n *NodeConfig) error {
-	// skip this if node runs in host mode
-	if strings.ToLower(n.NetworkMode) == "host" || strings.ToLower(n.NetworkMode) == "none" {
-		return nil
-	}
-	// disable tx checksum offload for linux containers on eth0 interfaces
-	nodeNS, err := ns.GetNS(n.NSPath)
-	if err != nil {
-		return err
-	}
-	err = nodeNS.Do(func(_ ns.NetNS) error {
-		// disabling offload on eth0 interface
-		err := utils.EthtoolTXOff("eth0")
-		if err != nil {
-			log.Infof("Failed to disable TX checksum offload for 'eth0' interface for Linux '%s' node: %v", n.ShortName, err)
-		}
-		return err
-	})
-	return err
 }
 
 type GenericFilter struct {
@@ -271,12 +247,26 @@ func (cd *ConfigDispatcher) GetVars() map[string]interface{} {
 
 // Extras contains extra node parameters which are not entitled to be part of a generic node config.
 type Extras struct {
-	SRLAgents []string `yaml:"srl-agents,omitempty"`
 	// Nokia SR Linux agents. As of now just the agents spec files can be provided here
-	MysocketProxy string `yaml:"mysocket-proxy,omitempty"`
+	SRLAgents []string `yaml:"srl-agents,omitempty"`
 	// Proxy address that mysocketctl will use
-	CeosCopyToFlash []string `yaml:"ceos-copy-to-flash,omitempty"`
+	MysocketProxy string `yaml:"mysocket-proxy,omitempty"`
 	// paths to files which are to be copied to ceos flash dir
+	CeosCopyToFlash []string `yaml:"ceos-copy-to-flash,omitempty"`
+	// k8s-kind node specific options
+	K8sKind *K8sKindExtras `yaml:"k8s_kind,omitempty"`
+}
+
+// K8sKindExtras represents the k8s-kind-specific extra options.
+type K8sKindExtras struct {
+	Deploy *K8sKindDeployExtras `yaml:"deploy,omitempty"`
+}
+
+// K8sKindDeployExtras represents the options used for the kind cluster creation.
+// It is aligned with the `kind create cluster` command options, but exposes
+// only the ones that are relevant for containerlab.
+type K8sKindDeployExtras struct {
+	Wait *string `yaml:"wait,omitempty"`
 }
 
 // ContainerDetails contains information that is commonly outputted to tables or graphs.
@@ -335,6 +325,8 @@ type CertificateConfig struct {
 	KeySize int `yaml:"key-size,omitempty"`
 	// ValidityDuration is the duration of the certificate validity
 	ValidityDuration time.Duration `yaml:"validity-duration"`
+	// list of subject Alternative Names (SAN) to be added to the node's certificate
+	SANs []string `yaml:"sans,omitempty"`
 }
 
 // Merge merges the given CertificateConfig into the current one.
@@ -353,6 +345,10 @@ func (c *CertificateConfig) Merge(x *CertificateConfig) *CertificateConfig {
 
 	if x.KeySize > 0 {
 		c.KeySize = x.KeySize
+	}
+
+	if len(x.SANs) > 0 {
+		c.SANs = x.SANs
 	}
 
 	return c
@@ -383,4 +379,34 @@ func ParsePullPolicyValue(s string) PullPolicyValue {
 
 	// default to IfNotPresent
 	return PullPolicyIfNotPresent
+}
+
+// HealthcheckConfig represents healthcheck parameters set for a container.
+type HealthcheckConfig struct {
+	// Test is the command to run to check the health of the container
+	Test []string `yaml:"test,omitempty"`
+	// Interval is the time to wait between checks in seconds
+	Interval int `yaml:"interval,omitempty"`
+	// Timeout is the time in seconds to wait before considering the check to have hung
+	Timeout int `yaml:"timeout,omitempty"`
+	// Retries is the number of consecutive failures needed to consider a container as unhealthy
+	Retries int `yaml:"retries,omitempty"`
+	// StartPeriod is the time to wait for the container to initialize
+	// before starting health-retries countdown in seconds
+	StartPeriod int `yaml:"start-period,omitempty"`
+}
+
+// GetIntervalDuration returns the interval as time.Duration.
+func (h *HealthcheckConfig) GetIntervalDuration() time.Duration {
+	return time.Duration(h.Interval) * time.Second
+}
+
+// GetTimeoutDuration returns the timeout as time.Duration.
+func (h *HealthcheckConfig) GetTimeoutDuration() time.Duration {
+	return time.Duration(h.Timeout) * time.Second
+}
+
+// GetStartPeriodDuration returns the start period as time.Duration.
+func (h *HealthcheckConfig) GetStartPeriodDuration() time.Duration {
+	return time.Duration(h.StartPeriod) * time.Second
 }

@@ -11,11 +11,11 @@ on:
   workflow_dispatch:
 
 env:
-  GOVER: 1.20.2
+  GO_VER: "1.20.2"
   CGO_ENABLED: 0
-  MKDOCS_INS_VER: 9.1.4-insiders-4.32.4-hellt
+  MKDOCS_INS_VER: 9.5.9-insiders-4.52.2-hellt
   GORELEASER_VER: v1.11.4
-  PODMAN_VER: v4.4.2
+  PY_VER: "3.10"
 
 jobs:
   file-changes:
@@ -23,9 +23,12 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       docs: ${{ steps.filter.outputs.docs }}
+      # exporting env vars to be used in invoked workflows
+      py_ver: ${{ env.PY_VER }}
+      go_ver: ${{ env.GO_VER }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v2
+      - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
@@ -44,6 +47,7 @@ jobs:
               - 'errors/**'
               - 'cert/**'
               - 'virt/**'
+              - 'git/**'
               - 'border0_api/**'
               - '.github/workflows/cicd.yml'
               - 'go.mod'
@@ -56,17 +60,24 @@ jobs:
               - '.github/workflows/cicd.yml'
 
   build-containerlab:
+    needs: file-changes
+    if: needs.file-changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/build-containerlab.yml
+    with:
+      go_ver: ${{ needs.file-changes.outputs.go_ver }}
+
+  staticcheck:
     runs-on: ubuntu-22.04
     needs: file-changes
     if: needs.file-changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
-      - uses: WillAbides/setup-go-faster@v1.10.1
+      - uses: WillAbides/setup-go-faster@v1.14.0
         with:
-          go-version: ${{ env.GOVER }}
+          go-version: ${{ env.GO_VER }}
 
       - name: Cache go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           # In order:
           # * Module download cache
@@ -77,24 +88,6 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-
-      - name: Build containerlab
-        run: make build-with-podman-debug BINARY=containerlab
-      # store clab binary as artifact
-      - uses: actions/upload-artifact@v3
-        with:
-          name: containerlab
-          path: containerlab
-
-  staticcheck:
-    runs-on: ubuntu-22.04
-    needs: file-changes
-    if: needs.file-changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - uses: actions/checkout@v4
-      - uses: WillAbides/setup-go-faster@v1.10.1
-        with:
-          go-version: ${{ env.GOVER }}
 
       - name: Staticcheck
         run: |
@@ -107,12 +100,12 @@ jobs:
     if: needs.file-changes.outputs.code == 'true' || startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
-      - uses: WillAbides/setup-go-faster@v1.10.1
+      - uses: WillAbides/setup-go-faster@v1.14.0
         with:
-          go-version: ${{ env.GOVER }}
+          go-version: ${{ env.GO_VER }}
 
       - name: Cache go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           # In order:
           # * Module download cache
@@ -128,69 +121,21 @@ jobs:
 
       # upload coverage report from unit tests, as they are then
       # merged with e2e tests coverage
-      - uses: actions/upload-artifact@v3
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage
-          path: ./tests/coverage/*
+          name: coverage-unit-test
+          path: /tmp/clab-tests/coverage/*
           retention-days: 7
 
   smoke-tests:
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        runtime:
-          - "docker"
-          - "podman"
+    uses: ./.github/workflows/smoke-tests.yml
+    with:
+      py_ver: ${{ needs.file-changes.outputs.py_ver }}
     needs:
-      - unit-test
-      - staticcheck
+      - file-changes
       - build-containerlab
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/download-artifact@v3
-        with:
-          name: containerlab
-      - name: Move containerlab to usr/bin
-        run: sudo mv ./containerlab /usr/bin/containerlab && sudo chmod a+x /usr/bin/containerlab
-      - name: Setup Podman
-        if: matrix.runtime == 'podman'
-        run: |
-          sudo apt purge -y podman
-          echo 'deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_22.04/ /' | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:unstable.list
-          curl -fsSL https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_22.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/devel_kubic_libcontainers_unstable.gpg > /dev/null
-          sudo apt update
-          sudo apt install -y podman
-          sudo systemctl start podman
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.8"
-          cache: pip
-          cache-dependency-path: "tests/requirements.txt"
-      - name: Install robotframework
-        run: |
-          pip install -r tests/requirements.txt
-      - name: Run smoke tests
-        run: |
-          bash ./tests/rf-run.sh ${{ matrix.runtime }} ./tests/01-smoke
-      # upload test reports as a zip file
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: 01-smoke-log
-          path: ./tests/out/*.html
-
-      # upload coverage report from unit tests, as they are then
-      # merged with e2e tests coverage
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: coverage
-          path: ./tests/coverage/*
-          retention-days: 7
 
   ext-container-tests:
     runs-on: ubuntu-22.04
@@ -199,29 +144,27 @@ jobs:
         runtime:
           - "docker"
     needs:
-      - unit-test
-      - staticcheck
       - build-containerlab
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: containerlab
       - name: Move containerlab to usr/bin
         run: sudo mv ./containerlab /usr/bin/containerlab && sudo chmod a+x /usr/bin/containerlab
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.8"
+          python-version: ${{ env.PY_VER }}
           cache: pip
           cache-dependency-path: "tests/requirements.txt"
       - name: Install robotframework
         run: |
           pip install -r tests/requirements.txt
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -230,19 +173,21 @@ jobs:
         run: |
           bash ./tests/rf-run.sh ${{ matrix.runtime }} ./tests/06-ext-container
       # upload test reports as a zip file
-      - uses: actions/upload-artifact@v3
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: 06-ext-container-log
+          name: 06-ext-container-log-${{ matrix.runtime }}
           path: ./tests/out/*.html
 
       # upload coverage report from unit tests, as they are then
       # merged with e2e tests coverage
-      - uses: actions/upload-artifact@v3
+      - name: upload coverage reports
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage
-          path: ./tests/coverage/*
+          name: coverage-ext-container-test-${{ matrix.runtime }}
+          path: /tmp/clab-tests/coverage/*
           retention-days: 7
 
   ceos-basic-tests:
@@ -252,29 +197,27 @@ jobs:
         runtime:
           - "docker"
     needs:
-      - unit-test
-      - staticcheck
       - build-containerlab
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: containerlab
       - name: Move containerlab to usr/bin
         run: sudo mv ./containerlab /usr/bin/containerlab && sudo chmod a+x /usr/bin/containerlab
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.8"
+          python-version: ${{ env.PY_VER }}
           cache: pip
           cache-dependency-path: "tests/requirements.txt"
       - name: Install robotframework
         run: |
           pip install -r tests/requirements.txt
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -285,81 +228,29 @@ jobs:
         run: |
           bash ./tests/rf-run.sh ${{ matrix.runtime }} ./tests/03-basic-ceos
       # upload test reports as a zip file
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: 03-basic-ceos-log
+          name: 03-basic-ceos-log-${{ matrix.runtime }}
           path: ./tests/out/*.html
 
       # upload coverage report from unit tests, as they are then
       # merged with e2e tests coverage
-      - uses: actions/upload-artifact@v3
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage
-          path: ./tests/coverage/*
+          name: coverage-ceos-tests-${{ matrix.runtime }}
+          path: /tmp/clab-tests/coverage/*
           retention-days: 7
 
   srlinux-basic-tests:
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        runtime:
-          - "docker"
-          - "podman"
+    uses: ./.github/workflows/srlinux-tests.yml
+    with:
+      py_ver: ${{ needs.file-changes.outputs.py_ver }}
     needs:
-      - unit-test
-      - staticcheck
+      - file-changes
       - build-containerlab
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/download-artifact@v3
-        with:
-          name: containerlab
-      - name: Move containerlab to usr/bin
-        run: sudo mv ./containerlab /usr/bin/containerlab && sudo chmod a+x /usr/bin/containerlab
-
-      - name: Setup Podman
-        if: matrix.runtime == 'podman'
-        # check http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_22.04/amd64/
-        # for available podman releases
-        run: |
-          sudo apt purge -y podman
-          echo 'deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_22.04/ /' | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:unstable.list
-          curl -fsSL https://download.opensuse.org/repositories/devel:kubic:libcontainers:unstable/xUbuntu_22.04/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/devel_kubic_libcontainers_unstable.gpg > /dev/null
-          sudo apt update
-          sudo apt install -y podman
-          sudo systemctl start podman
-
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.8"
-          cache: pip
-          cache-dependency-path: "tests/requirements.txt"
-      - name: Install robotframework
-        run: |
-          pip install -r tests/requirements.txt
-      - name: Run srlinux tests
-        run: |
-          bash ./tests/rf-run.sh ${{ matrix.runtime }} ./tests/02-basic-srl
-      # upload test reports as a zip file
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: 02-basic-srl-log
-          path: ./tests/out/*.html
-
-      # upload coverage report from unit tests, as they are then
-      # merged with e2e tests coverage
-      - uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: coverage
-          path: ./tests/coverage/*
-          retention-days: 7
 
   ixiac-one-basic-tests:
     runs-on: ubuntu-22.04
@@ -368,22 +259,20 @@ jobs:
         runtime:
           - "docker"
     needs:
-      - unit-test
-      - staticcheck
       - build-containerlab
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: containerlab
       - name: Move containerlab to usr/bin
         run: sudo mv ./containerlab /usr/bin/containerlab && sudo chmod a+x /usr/bin/containerlab
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.8"
+          python-version: ${{ env.PY_VER }}
           cache: pip
           cache-dependency-path: "tests/requirements.txt"
       - name: Install robotframework
@@ -393,22 +282,55 @@ jobs:
         run: |
           bash ./tests/rf-run.sh ${{ matrix.runtime }} ./tests/04-basic-ixiacone
       # upload test reports as a zip file
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: 04-basic-ixiacone-log
+          name: 04-basic-ixiacone-log-${{ matrix.runtime }}
           path: ./tests/out/*.html
 
       # upload coverage report from unit tests, as they are then
       # merged with e2e tests coverage
-      - uses: actions/upload-artifact@v3
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage
-          path: ./tests/coverage/*
+          name: coverage-ixiac-one-tests-${{ matrix.runtime }}
+          path: /tmp/clab-tests/coverage/*
           retention-days: 7
 
-    # create a job that downloads coverage artifact and uses codecov to upload it
+  vxlan-tests:
+    uses: ./.github/workflows/vxlan-tests.yml
+    needs:
+      - file-changes
+      - build-containerlab
+    with:
+      py_ver: ${{ needs.file-changes.outputs.py_ver }}
+
+  kind-tests:
+    uses: ./.github/workflows/kind-tests.yml
+    needs:
+      - file-changes
+      - build-containerlab
+    with:
+      py_ver: ${{ needs.file-changes.outputs.py_ver }}
+
+  sros-tests:
+    uses: ./.github/workflows/sros-tests.yml
+    needs:
+      - file-changes
+      - build-containerlab
+    with:
+      py_ver: ${{ needs.file-changes.outputs.py_ver }}
+
+  fortigate-tests:
+    uses: ./.github/workflows/fortigate-tests.yml
+    needs:
+      - file-changes
+      - build-containerlab
+    with:
+      py_ver: ${{ needs.file-changes.outputs.py_ver }}
+
+  # a job that downloads coverage artifact and uses codecov to upload it
   coverage:
     runs-on: ubuntu-22.04
     needs:
@@ -418,22 +340,35 @@ jobs:
       - ceos-basic-tests
       - srlinux-basic-tests
       - ixiac-one-basic-tests
+      - vxlan-tests
+      - kind-tests
+      - sros-tests
+      - fortigate-tests
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: WillAbides/setup-go-faster@v1.10.1
+
+      - uses: WillAbides/setup-go-faster@v1.14.0
         with:
-          go-version: ${{ env.GOVER }}
-      - uses: actions/download-artifact@v3
+          go-version: ${{ env.GO_VER }}
+
+      - uses: actions/download-artifact@v4
         with:
-          name: coverage
-          path: tests/coverage
-      - name: convert Go's binary coverage to text coverage
+          pattern: coverage*
+          path: /tmp/clab-tests/coverage
+          merge-multiple: true
+      - run: ls -R /tmp/clab-tests/coverage
+
+      - name: Convert Go's binary coverage to text coverage
         run: make convert-coverage
+
       - name: Upload coverage to codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   docs-test:
     runs-on: ubuntu-22.04
@@ -443,7 +378,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -452,7 +387,7 @@ jobs:
       - run: docker run -v $(pwd):/docs --user $(id -u):$(id -g) --entrypoint mkdocs ghcr.io/srl-labs/mkdocs-material-insiders:$MKDOCS_INS_VER build --clean --strict
 
       - name: Cache htmltest external links
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: tmp/.htmltest
           # key will contain hash of all md files to check if files have changed
@@ -473,11 +408,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs:
       - docs-test
+      - unit-test
       - smoke-tests
       - ceos-basic-tests
       - srlinux-basic-tests
       - ixiac-one-basic-tests
       - ext-container-tests
+      - vxlan-tests
+      - kind-tests
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -485,12 +423,12 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: WillAbides/setup-go-faster@v1.10.1
+        uses: WillAbides/setup-go-faster@v1.14.0
         with:
-          go-version: ${{ env.GOVER }}
+          go-version: ${{ env.GO_VER }}
 
       - name: Cache go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           # In order:
           # * Module download cache
@@ -503,14 +441,14 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v4
+        uses: goreleaser/goreleaser-action@v5
         with:
           version: ${{ env.GORELEASER_VER }}
           args: release --rm-dist --debug
@@ -529,7 +467,7 @@ jobs:
           fetch-depth: 0
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -551,7 +489,7 @@ jobs:
           fetch-depth: 0
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

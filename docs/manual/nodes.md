@@ -1,3 +1,10 @@
+---
+search:
+  boost: 6
+---
+
+# Nodes
+
 Node object is one of the containerlab' pillars. Essentially, it is nodes and links what constitute the lab topology. To let users build flexible and customizable labs the nodes are meant to be configurable.
 
 The node configuration is part of the [topology definition file](topo-def-file.md) and **may** consist of the following fields that we explain in details below.
@@ -7,7 +14,7 @@ The node configuration is part of the [topology definition file](topo-def-file.m
 topology:
   nodes:
     node1:  # node name
-      kind: srl
+      kind: nokia_srlinux
       type: ixrd2
       image: ghcr.io/nokia/srlinux
       startup-config: /root/mylab/node1.cfg
@@ -33,7 +40,7 @@ The `kind` property selects which kind this node is of. Kinds are essentially a 
     ```yaml
     topology:
       defaults:
-        kind: srl
+        kind: nokia_srlinux
       nodes:
         node1:
         # kind value of `srl` is inherited from defaults section
@@ -79,33 +86,6 @@ topology:
     srl:
       image: ghcr.io/nokia/srlinux
       image-pull-policy: Always
-```
-
-### subject alternative names (SAN)
-
-With `SANs` the user sets the Subject Alternative Names that will be added to the node's certificate. Host names that are set by default are:
-
-For a topology node named "srl" in a lab named "srl01", the following SANs are set by default:
-
-- `srl`
-- `clab-srl01-srl`
-- `srl.srl01.io`
-- IPv4/6 addresses of the node
-
-```yaml
-name: srl01
-
-topology:
-  kinds:
-    srl:
-      type: ixrd3
-      image: ghcr.io/nokia/srlinux
-
-  nodes:
-    srl:
-      kind: srl
-      SANs:
-        - "test.com"
 ```
 
 ### license
@@ -154,7 +134,7 @@ It is possible to specify a remote `http(s)` location for a startup-config file.
 ```yaml
 topology:
   kinds:
-    srl:
+    nokia_srlinux:
       type: ixrd3
       image: ghcr.io/nokia/srlinux
       startup-config: https://raw.githubusercontent.com/srl-labs/containerlab/main/tests/02-basic-srl/srl2-startup.cli
@@ -166,6 +146,7 @@ The remote file will be downloaded to the containerlab's temp directory at `$TMP
 
     * Upon deletion of a lab, the downloaded startup-config files will not be removed. A manual cleanup should be performed if required.
     * If a lab is redeployed with the lab name and startup-config paths unchanged, the local file will be overwritten.
+    * For https locations the certificates won't be verified to allow fetching artifacts from servers with self-signed certificates.
 
 ### enforce-startup-config
 
@@ -173,7 +154,7 @@ By default, containerlab will use the config file that is available in the lab d
 
 ### suppress-startup-config
 
-By default, containerlab will create a startup-config when intially creating a lab.  To prevent a startup-config file from being created (in a Zero-Touch Provisioning lab, for example), set the `suppress-startup-config` to `true`.
+By default, containerlab will create a startup-config when initially creating a lab.  To prevent a startup-config file from being created (in a Zero-Touch Provisioning lab, for example), set the `suppress-startup-config` to `true`.
 
 ### auto-remove
 
@@ -204,12 +185,14 @@ topology:
         - /root/files:/root/files:ro # (2)!
         - somefile:/somefile # (3)!
         - ~/.ssh/id_rsa:/root/.ssh/id_rsa # (4)!
+        - /var/run/somedir # (5)!
 ```
 
 1. mount a host file found by the path `/usr/local/bin/gobgp` to a container under `/root/gobgp` (implicit RW mode)
 2. mount a `/root/files` directory from a host to a container in RO mode
 3. when a host path is given in a relative format, the path is considered relative to the topology file and not a current working directory.
 4. The `~` char will be expanded to a user's home directory.
+5. mount an anonymous volume to a container under `/var/run/somedir` (implicit RW mode)
 
 ???info "Bind variables"
     By default, binds are either provided as an absolute or a relative (to the current working dir) path. Although the majority of cases can be very well covered with this, there are situations in which it is desirable to use a path that is relative to the node-specific example.
@@ -320,7 +303,7 @@ topology:
       ENV1: 3 # ENV1=3 will be set if it's not set on kind or node level
       ENV2: glob # ENV2=glob will be set for all nodes
   kinds:
-    srl:
+    nokia_srlinux:
       env:
         ENV1: 2 # ENV1=2 will be set to if it's not set on node level
         ENV3: kind # ENV3=kind will be set for all nodes of srl kind
@@ -351,7 +334,7 @@ topology:
       - envfiles/defaults
       - /home/user/clab/default-env
   kinds:
-    srl:
+    nokia_srlinux:
       env-files:
         - envfiles/common
         - ~/spines
@@ -370,7 +353,7 @@ topology:
   defaults:
     user: alice # alice user will be used for all nodes unless set on kind or node levels
   kinds:
-    srl:
+    nokia_srlinux:
       user: bob # bob user will be used for nodes of kind srl unless it is set on node level
   nodes:
     node1:
@@ -386,7 +369,7 @@ topology:
   defaults:
     entrypoint: entrypoint.sh
   kinds:
-    srl:
+    nokia_srlinux:
       entrypoint: entrypoint.sh
   nodes:
     node1:
@@ -402,7 +385,7 @@ topology:
   defaults:
     cmd: bash cmd.sh
   kinds:
-    srl:
+    nokia_srlinux:
       cmd: bash cmd2.sh
   nodes:
     node1:
@@ -424,7 +407,7 @@ topology:
       label1: value1
       label2: value2
   kinds:
-    srl:
+    nokia_srlinux:
       labels:
         label1: kind_value1
         label3: value3
@@ -454,7 +437,7 @@ Read more about user-defined management addresses [here](network.md#user-defined
 ```yaml
 nodes:
     r1:
-      kind: srl
+      kind: nokia_srlinux
       mgmt-ipv4: 172.20.20.100
 ```
 
@@ -467,7 +450,7 @@ Read more about user-defined management addresses [here](network.md#user-defined
 ```yaml
 nodes:
     r1:
-      kind: srl
+      kind: nokia_srlinux
       mgmt_ipv6: 2001:172:20:20::100
 ```
 
@@ -502,7 +485,7 @@ name: demo
 topology:
   nodes:
     r1:
-      kind: srl
+      kind: nokia_srlinux
       publish:
         - tcp/22     # tcp port 22 will be published
         - tcp/57400  # tcp port 57400 will be published
@@ -590,6 +573,22 @@ my-node:
 
 The `exec` is particularly helpful to provide some startup configuration for linux nodes such as IP addressing and routing instructions.
 
+/// details | exec and access to env vars
+When you want the `exec` command to have access to the env variables defined in the topology file or in the container' environment you have to escape the `$` sign:
+
+```yaml
+  nodes:
+    test:
+      kind: linux
+      image: alpine:3
+      env:
+        FOO: BAR
+      exec:
+        - ash -c 'echo $$FOO'
+```
+
+///
+
 ### memory
 
 By default, container runtimes do not impose any memory resource constraints[^1].
@@ -656,7 +655,7 @@ topology:
       net.ipv4.ip_forward: 1
       net.ipv6.icmp.ratelimi: 100
   kinds:
-    srl:
+    nokia_srlinux:
       sysctls:
         net.ipv4.ip_forward: 0
         
@@ -666,61 +665,98 @@ topology:
         net.ipv6.icmp.ratelimit: 1000
 ```
 
-### wait-for
+### stages
 
-For the explicit definition of startup dependencies between nodes, the `wait-for` knob under the `kind` or `node` level can be used.
+Containerlab v0.51.0 introduces a new concept of **stages**. Stages are a way to define stages a node goes through during its lifecycle and the interdependencies between the different stages of different nodes in the lab.
 
-In the example below node _srl3_ will wait until _srl1_ and _srl2_ are in running state before _srl3_ gets created. The _client_ node will (via the definition in the _linux_ kind) wait for all three _srlX_ nodes to be created before it gets created.
+The stages are currently mainly used to host the `wait-for` knob, which is used to define the startup dependencies between nodes.
+
+The following stages have been defined for a node:
+
+- `create` - a node enters this stage when containerlab is about to create the node's container. The node finishes this stage when the container is created and is in the `created` state.
+- `create-links` - a node enters this stage when containerlab is about to attach the links to the node. The node finishes this stage when all the links have been attached to the node.
+- `configure` - a node enters this stage when containerlab is about to run post-deploy commands associated with the node. The node finishes this stage when post deployment commands have been completed.
+- `healthy` - this stage has no distinctive enter/exit points. It is used to define a stage where a node is considered healthy. The healthiness of a node is defined by the healthcheck configuration of the node and the appropriate container status.
+- `exit` - a node reaches the exit state when the container associated with the node has `exited` status.
+
+Stages can be defined on the `defaults`, `kind` and `node` levels.
+
+#### wait-for
+
+For the explicit definition of interstage dependencies between the nodes, the `wait-for` knob under the `stages` level can be used.
+
+In the example below node four nodes are defined with different stages and `wait-for` dependencies between the stages.
+
+1. `node1` will enter the `create` stage only after `node2` has **finished** its `create` stage.
+2. `node2` will enter its `create` stage only after `node3` has **finished** its `create-links` stage. This means that all the links associated with `node3` has been attached to the `node3` node.
+3. `node3` will enter its `create` stage only after `node4` has been found `healthy`. This means that `node4` container must be healthy for `node3` to enter the creation stage.
+4. `node4` doesn't "wait" for any of the nodes, but it defines its own healthcheck configuration.
 
 ```yaml
-name: waitfor
-topology:
-  kinds:
-    srl:
-      image: ghcr.io/nokia/srlinux
-    linux:
-      image: alpine:3
-      wait-for:
-        - srl1
-        - srl2
-        - srl3
-
   nodes:
-    srl1:
-      kind: srl
-    srl2:
-      kind: srl
-    srl3:
-      kind: srl
-      wait-for:
-        - srl1
-        - srl2
-    client:
-      kind: linux
+    node1:
+      stages:
+        create:
+          wait-for:
+            - node: node2
+              stage: create
+
+    node2:
+      stages:
+        create:
+          wait-for:
+            - node: node3
+              stage: create-links
+
+    node3:
+      stages:
+        create:
+          wait-for:
+            - node: node4
+              stage: healthy
+
+    node4:
+      healthcheck:
+        start-period: 5
+        interval: 1
+        test:
+          - CMD-SHELL
+          - cat /etc/os-release
 ```
 
-The built-in Dependency Manger takes care of all the dependencies, both explicitly-defined and implicit ones. It will inspect the dependency graph an make sure it is acyclic. The output of the Dependency Manager graph is visible in the debug mode and looks like the following:
+Containerlab's built-in Dependency Manger takes care of all the dependencies, both explicitly-defined and implicit ones. It will inspect the dependency graph and make sure it is acyclic. The output of the Dependency Manager graph is visible in the debug mode.
+
+Note, that `wait-for` is a list, a node's stage may depend on several other nodes' stages.
+
+/// admonition | Usage scenarios
+    type: tip
+One of the use cases where `wait-for` might be crucial is when a number of VM-based nodes are deployed. Typically, simultaneous deployment of VMs might lead to shortage of CPU resources and VMs might fail to boot. In such cases, `wait-for` can be used to define the order of VM deployment, thus ensuring that certain VMs enter their `create` stage after certain nodes have reached `healthy` status.
+///
+
+#### Per-stage command execution
+
+The existing [`exec`](#exec) node configuration parameter is used to run commands when then node has finished all its deployment stages. Whilst this is the most common use case, it has its limitations, namely you can't run commands when the node is about to deploy its links, or when it is about to enter the `healthy` stage.
+
+These more advanced command execution scenarios are enabled in the per-stage command execution feature.
+
+<!-- --8<-- [start:per-stage-1] -->
+With per-stage command execution the user can define `exec` block under each stage; moreover, it is possible to specify when the commands should be run `on-enter` or `on-exit` of the stage.
 
 ```yaml
-DEBU[0004] Dependencies:
-srl2 -> [  ]
-srl3 -> [ srl1, srl2 ]
-client -> [ srl1, srl2, srl3 ]
-srl1 -> [  ] 
-DEBU[0004] - cycle check round 1 - 
-srl1 <- [ client, srl3 ]
-srl2 <- [ client, srl3 ]
-srl3 <- [ client ]
-client <- [  ] 
-DEBU[0004] - cycle check round 2 - 
-srl1 <- [ srl3 ]
-srl2 <- [ srl3 ]
-srl3 <- [  ] 
-DEBU[0004] - cycle check round 3 - 
-srl2 <- [  ]
-srl1 <- [  ] 
-DEBU[0004] node creation graph is successfully validated as being acyclic 
+nodes:
+  node1:
+    stages:
+      create-links:
+        exec:
+          on-enter:
+            - ls /sys/class/net/
 ```
+
+In the example above, the `ls /sys/class/net/` command will be executed when `node1` is about to enter the `create-links` stage. As expected, the command will list only interfaces provisioned by docker (eth0 and lo), but none of the containerlab-provisioned interfaces, since the create-links stage has not been finished yet.
+
+Per-stage command execution gives you additional flexibility in terms of when the commands are executed, and what commands are executed at each stage.
+
+<!-- --8<-- [end:per-stage-1] -->
 
 ### certificate
 
@@ -749,6 +785,62 @@ To configure key size and certificate validity duration use the following option
     key-size: 4096
     validity-duration: 1h
 ```
+
+#### subject alternative names (SAN)
+
+With `SANs` field of the certificate block the user sets the Subject Alternative Names that will be added to the node's certificate.
+
+For a topology node named "srl" in a lab named "srl01", the following SANs are set by default:
+
+- `srl`
+- `clab-srl01-srl`
+- `srl.srl01.io`
+- IPv4/6 addresses of the node
+
+```yaml
+topology:
+
+  nodes:
+    srl:
+      kind: nokia_srlinux
+      certificate:
+        sans:
+          - "test.com"
+          - 192.168.96.155
+```
+
+### healthcheck
+
+Containerlab supports the [docker healthcheck](https://docs.docker.com/engine/reference/builder/#healthcheck) configuration for the nodes. The healthcheck instruction can be set on the `defaults`, `kind` or `node` level, with the node level likely being the most used one.
+
+Healtcheck allows containerlab users to define the healthcheck configuration that will be used by the container runtime to check the health of the container.
+
+```yaml
+topology:
+  nodes:
+    l1:
+      kind: linux
+      image: alpine:3
+      healthcheck:
+        test:
+          - CMD-SHELL
+          - cat /etc/os-release
+        start-period: 3
+        retries: 1
+        interval: 5
+        timeout: 2
+```
+
+The healthcheck instruction is a dictionary that can contain the following keys:
+
+- `test` - the command to run to check the health of the container. The command is provided as a list of strings. The first element of the list is the type of the command - either `CMD` or `CMD-SHELL`, the rest are the arguments.  
+    When `CMD` type is used, the command and its arguments should be provided as a separate list elements. The `CMD-SHELL` allows you to specify the command that will be evaluated by the container's shell.
+- `start-period` - the time in seconds to wait for the container to bootstrap before running the first health check. The default value is 0 seconds.
+- `interval` - the time interval between the health checks. The default value is 30 seconds.
+- `timeout` - the time to wait for a single health check operation to complete. The default value is 30 seconds.
+- `retries` - the number of consecutive healthcheck failures needed to report the container as unhealthy. The default value is 3.
+
+When the node is configured with a healthcheck the health status is visible in the `docker inspect` and `docker ps` outputs.
 
 [^1]: [docker runtime resources constraints](https://docs.docker.com/config/containers/resource_constraints/).
 [^2]: this deployment model makes two containers to use a shared network namespace, similar to a Kubernetes pod construct.

@@ -8,6 +8,7 @@
 | **Version information**[^2]   | `containerlab:0.13.0`, `frrouting/frr:v7.5.1`, `docker-ce:19.03.13`  |
 
 ## Description
+
 This lab example consists of three FRR routers connected in a ring topology. Each router has one PC connected to it.
 
 This is also an example of how to pre-configure lab nodes of `linux` kind in containerlab.

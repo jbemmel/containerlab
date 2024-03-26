@@ -4,7 +4,6 @@ Library             String
 Library             Process
 Resource            ../common.robot
 
-Suite Setup         Setup
 Suite Teardown      Run    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/01-linux-nodes.clab.yml --cleanup
 
 
@@ -15,7 +14,6 @@ ${runtime}                  docker
 # runtime command to execute tasks in a container
 # defaults to docker exec. Will be rewritten to containerd `ctr` if needed in "Define runtime exec" test
 ${runtime-cli-exec-cmd}     sudo docker exec
-${bind-orig-path}           /tmp/clab-01-test.txt
 ${n2-ipv4}                  172.20.20.100/24
 ${n2-ipv6}                  2001:172:20:20::100/64
 
@@ -117,11 +115,17 @@ Verify links in node l1
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     Should Contain    ${output}    state UP
+    # testing user-defined MTU is set
+    Should Contain    ${output}    2000
+
     ${rc}    ${output} =    Run And Return Rc And Output
     ...    ${runtime-cli-exec-cmd} clab-${lab-name}-l1 ip link show eth2
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     Should Contain    ${output}    state UP
+    # testing default MTU is set
+    Should Contain    ${output}    9500
+
     ${rc}    ${output} =    Run And Return Rc And Output
     ...    ${runtime-cli-exec-cmd} clab-${lab-name}-l1 ip link show eth3
     Log    ${output}
@@ -296,6 +300,39 @@ Verify DNS-Options Config
     Log    ${output}
     Should Contain    ${output}    rotate
 
+Verify Exec rc == 0 on containers match
+    [Documentation]    Checking that the return code is != 0 if on the exce call not containers match
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --cmd "echo test"
+    Log    ${output}
+    Should Contain    ${output}    test
+    Should Not Contain    ${output}    Error: filter did not match any containers
+    Should Be Equal As Integers    ${rc}    0
+
+Verify Exec rc != 0 on no containers match
+    [Documentation]    Checking that the return code is != 0 if on the exce call not containers match
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --label clab-node-name=nonexist --cmd "echo test"
+    Log    ${output}
+    Should Not Contain    ${output}    test
+    Should Contain    ${output}    Error: filter did not match any containers
+    Should Not Be Equal As Integers    ${rc}    0
+
+Verify l1 node is healthy
+    [Documentation]    Checking if l1 node is healthy after the lab is deployed
+
+    Sleep    3s
+
+    ${output} =    Process.Run Process
+    ...    sudo ${runtime} inspect clab-${lab-name}-l1 -f ''{{.State.Health.Status}}''
+    ...    shell=True
+    Log    ${output.stdout}
+    Log    ${output.stderr}
+    Should Be Equal As Integers    ${output.rc}    0
+    # check if output contains the healthy status
+    Should Not Contain    ${output.stdout}    unhealthy
+    Should Contain    ${output.stdout}    healthy
+
 Destroy ${lab-name} lab
     ${rc}    ${output} =    Run And Return Rc And Output
     ...    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file} --cleanup
@@ -326,10 +363,6 @@ Verify iptables allow rule are gone
 
 
 *** Keywords ***
-Setup
-    Run    sudo rm -rf ${bind-orig-path}
-    OperatingSystem.Create File    ${bind-orig-path}    Hello, containerlab
-
 Match IPv6 Address
     [Arguments]
     ...    ${address}=${None}
