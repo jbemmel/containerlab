@@ -24,21 +24,33 @@
       "mgmt-ipv6-address": "{{$c.MgmtIPv6Address}}",
       "mgmt-ipv6-prefix-length": {{$c.MgmtIPv6PrefixLength}},
       "mac-address": "{{$c.MacAddress}}",
-      "labels": {{ToJSONPretty $c.Labels "      " "  "}}
+      "labels": {{ToJSONPretty $c.Labels "      " "  "}},
+      "port-bindings": [ 
+        {{- range $pidx, $p := $c.ResultingPortBindings}}{{- if gt $pidx 0}},{{end}}
+        {
+          "host-ip": "{{$p.HostIP}}",
+          "host-port": {{$p.HostPort}},
+          "port": {{$p.ContainerPort}},
+          "protocol": "{{$p.Protocol}}"
+        }{{- end }}
+      ]
     }{{$i = add $i 1}}{{end}}
   },
   "links": [{{range $i, $l := .Clab.Links}}{{if $i}},{{end}}
+    {{- $eps :=  $l.GetEndpoints }}
+    {{- $ep :=  index $eps 0 }}
     {
       "a": {
-        "node": "{{ $l.A.Node.ShortName }}",
-        "interface": "{{ $l.A.EndpointName }}",
-        "mac": "{{ $l.A.MAC }}",
+        "node": "{{ $ep.GetNode.GetShortName }}",
+        "interface": "{{ $ep.GetIfaceName }}",
+        "mac": "{{ $ep.GetMac }}",
         "peer": "z"
       },
+      {{- $ep :=  index $eps 1 }}
       "z": {
-        "node": "{{ $l.B.Node.ShortName }}",
-        "interface": "{{ $l.B.EndpointName }}",
-        "mac": "{{ $l.B.MAC }}",
+        "node": "{{  $ep.GetNode.GetShortName }}",
+        "interface": "{{ $ep.GetIfaceName }}",
+        "mac": "{{ $ep.GetMac }}",
         "peer": "a"
       }
     }{{end}}

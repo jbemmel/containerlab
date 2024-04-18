@@ -7,146 +7,96 @@ package vr_csr
 import (
 	"context"
 	"fmt"
-	"os"
 	"path"
-	"path/filepath"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/netconf"
 	"github.com/srl-labs/containerlab/nodes"
-	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
 	"github.com/srl-labs/containerlab/utils"
 )
 
-var kindnames = []string{"vr-csr", "vr-cisco_csr1000v"}
+var (
+	kindnames          = []string{"cisco_csr1000v", "vr-csr", "vr-cisco_csr1000v"}
+	defaultCredentials = nodes.NewCredentials("admin", "admin")
+)
 
 const (
 	scrapliPlatformName = "cisco_iosxe"
 
 	configDirName   = "config"
 	startupCfgFName = "startup-config.cfg"
-
-	defaultUser     = "admin"
-	defaultPassword = "admin"
 )
 
-func init() {
-	nodes.Register(kindnames, func() nodes.Node {
+// Register registers the node in the NodeRegistry.
+func Register(r *nodes.NodeRegistry) {
+	r.Register(kindnames, func() nodes.Node {
 		return new(vrCsr)
-	})
-	err := nodes.SetDefaultCredentials(kindnames, defaultUser, defaultPassword)
-	if err != nil {
-		log.Error(err)
-	}
+	}, defaultCredentials)
 }
 
 type vrCsr struct {
-	cfg     *types.NodeConfig
-	mgmt    *types.MgmtNet
-	runtime runtime.ContainerRuntime
+	nodes.DefaultNode
 }
 
-func (s *vrCsr) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
-	s.cfg = cfg
+func (n *vrCsr) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
+	// Init DefaultNode
+	n.DefaultNode = *nodes.NewDefaultNode(n)
+	// set virtualization requirement
+	n.HostRequirements.VirtRequired = true
+
+	n.Cfg = cfg
 	for _, o := range opts {
-		o(s)
+		o(n)
 	}
 	// env vars are used to set launch.py arguments in vrnetlab container
 	defEnv := map[string]string{
 		"CONNECTION_MODE":    nodes.VrDefConnMode,
-		"USERNAME":           "admin",
-		"PASSWORD":           "admin",
-		"DOCKER_NET_V4_ADDR": s.mgmt.IPv4Subnet,
-		"DOCKER_NET_V6_ADDR": s.mgmt.IPv6Subnet,
+		"USERNAME":           defaultCredentials.GetUsername(),
+		"PASSWORD":           defaultCredentials.GetPassword(),
+		"DOCKER_NET_V4_ADDR": n.Mgmt.IPv4Subnet,
+		"DOCKER_NET_V6_ADDR": n.Mgmt.IPv6Subnet,
 	}
-	s.cfg.Env = utils.MergeStringMaps(defEnv, s.cfg.Env)
+	n.Cfg.Env = utils.MergeStringMaps(defEnv, n.Cfg.Env)
 
 	// mount config dir to support startup-config functionality
-	s.cfg.Binds = append(s.cfg.Binds, fmt.Sprint(path.Join(s.cfg.LabDir, configDirName), ":/config"))
+	n.Cfg.Binds = append(n.Cfg.Binds, fmt.Sprint(path.Join(n.Cfg.LabDir, configDirName), ":/config"))
 
-	if s.cfg.Env["CONNECTION_MODE"] == "macvtap" {
+	if n.Cfg.Env["CONNECTION_MODE"] == "macvtap" {
 		// mount dev dir to enable macvtap
-		s.cfg.Binds = append(s.cfg.Binds, "/dev:/dev")
+		n.Cfg.Binds = append(n.Cfg.Binds, "/dev:/dev")
 	}
 
-	s.cfg.Cmd = fmt.Sprintf("--username %s --password %s --hostname %s --connection-mode %s --trace",
-		s.cfg.Env["USERNAME"], s.cfg.Env["PASSWORD"], s.cfg.ShortName, s.cfg.Env["CONNECTION_MODE"])
-
-	// set virtualization requirement
-	s.cfg.HostRequirements.VirtRequired = true
+	n.Cfg.Cmd = fmt.Sprintf("--username %s --password %s --hostname %s --connection-mode %s --trace",
+		n.Cfg.Env["USERNAME"], n.Cfg.Env["PASSWORD"], n.Cfg.ShortName, n.Cfg.Env["CONNECTION_MODE"])
 
 	return nil
 }
 
-func (s *vrCsr) Config() *types.NodeConfig { return s.cfg }
-
-func (s *vrCsr) PreDeploy(_, _, _ string) error {
-	utils.CreateDirectory(s.cfg.LabDir, 0777)
-	return loadStartupConfigFile(s.cfg)
-}
-
-func (s *vrCsr) Deploy(ctx context.Context) error {
-	cID, err := s.runtime.CreateContainer(ctx, s.cfg)
+func (s *vrCsr) PreDeploy(_ context.Context, params *nodes.PreDeployParams) error {
+	utils.CreateDirectory(s.Cfg.LabDir, 0777)
+	_, err := s.LoadOrGenerateCertificate(params.Cert, params.TopologyName)
 	if err != nil {
-		return err
+		return nil
 	}
-	_, err = s.runtime.StartContainer(ctx, cID, s.cfg)
-	return err
+	return nodes.LoadStartupConfigFileVr(s, configDirName, startupCfgFName)
 }
 
-func (*vrCsr) PostDeploy(_ context.Context, _ map[string]nodes.Node) error {
-	return nil
-}
-
-func (s *vrCsr) GetImages() map[string]string {
-	return map[string]string{
-		nodes.ImageKey: s.cfg.Image,
-	}
-}
-
-func (*vrCsr) Destroy(_ context.Context) error          { return nil }
-func (s *vrCsr) WithMgmtNet(mgmt *types.MgmtNet)        { s.mgmt = mgmt }
-func (s *vrCsr) WithRuntime(r runtime.ContainerRuntime) { s.runtime = r }
-func (s *vrCsr) GetRuntime() runtime.ContainerRuntime   { return s.runtime }
-
-func (s *vrCsr) Delete(ctx context.Context) error {
-	return s.runtime.DeleteContainer(ctx, s.cfg.LongName)
-}
-
-func (s *vrCsr) SaveConfig(_ context.Context) error {
-	err := netconf.SaveConfig(s.cfg.LongName,
-		defaultUser,
-		defaultPassword,
+func (n *vrCsr) SaveConfig(_ context.Context) error {
+	err := netconf.SaveConfig(n.Cfg.LongName,
+		defaultCredentials.GetUsername(),
+		defaultCredentials.GetPassword(),
 		scrapliPlatformName,
 	)
 	if err != nil {
 		return err
 	}
 
-	log.Infof("saved %s running configuration to startup configuration file\n", s.cfg.ShortName)
+	log.Infof("saved %s running configuration to startup configuration file\n", n.Cfg.ShortName)
 	return nil
 }
 
-func loadStartupConfigFile(node *types.NodeConfig) error {
-	// create config directory that will be bind mounted to vrnetlab container at / path
-	utils.CreateDirectory(path.Join(node.LabDir, configDirName), 0777)
-
-	if node.StartupConfig != "" {
-		// dstCfg is a path to a file on the clab host that will have rendered configuration
-		dstCfg := filepath.Join(node.LabDir, configDirName, startupCfgFName)
-
-		c, err := os.ReadFile(node.StartupConfig)
-		if err != nil {
-			return err
-		}
-
-		cfgTemplate := string(c)
-
-		err = node.GenerateConfig(dstCfg, cfgTemplate)
-		if err != nil {
-			log.Errorf("node=%s, failed to generate config: %v", node.ShortName, err)
-		}
-	}
-	return nil
+// CheckInterfaceName checks if a name of the interface referenced in the topology file correct.
+func (n *vrCsr) CheckInterfaceName() error {
+	return nodes.GenericVMInterfaceCheck(n.Cfg.ShortName, n.Endpoints)
 }

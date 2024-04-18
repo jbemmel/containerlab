@@ -8,17 +8,17 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"text/template"
 
+	"github.com/a8m/envsubst"
 	"github.com/hairyhenderson/gomplate/v3"
 	"github.com/hairyhenderson/gomplate/v3/data"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/srl-labs/containerlab/types"
 	"github.com/srl-labs/containerlab/utils"
 	"gopkg.in/yaml.v2"
 )
@@ -27,41 +27,27 @@ const (
 	varFileSuffix = "_vars"
 )
 
-// TopoFile type is a struct which defines parameters of the topology file.
-type TopoFile struct {
-	path     string // topo file path
-	dir      string // topo file dir path
-	fullName string // file name with extension
-	name     string // file name without extension
-}
-
-// GetDir returns the path of a directory that contains topology file.
-func (tf *TopoFile) GetDir() string {
-	return tf.dir
-}
-
-// GetTopology parses the topology file into c.Conf structure
+// LoadTopologyFromFile loads a topology by the topo file path
+// parses the topology file into c.Conf structure
 // as well as populates the TopoFile structure with the topology file related information.
-func (c *CLab) GetTopology(topo, varsFile string) error {
-	fileBase := filepath.Base(topo)
+func (c *CLab) LoadTopologyFromFile(topo, varsFile string) error {
+	var err error
 
-	topoAbsPath, err := filepath.Abs(topo)
+	c.TopoPaths, err = types.NewTopoPaths(topo)
 	if err != nil {
 		return err
 	}
 
-	topoDir := filepath.Dir(topoAbsPath)
-
 	// load the topology file/template
-	topologyTemplate, err := template.New(fileBase).
+	topologyTemplate, err := template.New(c.TopoPaths.TopologyFilenameBase()).
 		Funcs(gomplate.CreateFuncs(context.Background(), new(data.Data))).
-		ParseFiles(topoAbsPath)
+		ParseFiles(c.TopoPaths.TopologyFilenameAbsPath())
 	if err != nil {
 		return err
 	}
 
 	// read template variables
-	templateVars, err := readTemplateVariables(topoAbsPath, varsFile)
+	templateVars, err := readTemplateVariables(c.TopoPaths.TopologyFilenameAbsPath(), varsFile)
 	if err != nil {
 		return err
 	}
@@ -76,10 +62,8 @@ func (c *CLab) GetTopology(topo, varsFile string) error {
 	}
 
 	// create a hidden file that will contain the rendered topology
-	if !strings.HasPrefix(fileBase, ".") {
-		backupFPath := filepath.Join(topoDir,
-			fmt.Sprintf(".%s.yml.bak", fileBase[:len(fileBase)-len(filepath.Ext(topoAbsPath))]))
-
+	if !strings.HasPrefix(c.TopoPaths.TopologyFilenameBase(), ".") {
+		backupFPath := c.TopoPaths.TopologyBakFileAbsPath()
 		err = utils.CreateFile(backupFPath, buf.String())
 		if err != nil {
 			log.Warnf("Could not write rendered topology: %v", err)
@@ -88,20 +72,17 @@ func (c *CLab) GetTopology(topo, varsFile string) error {
 	log.Debugf("topology:\n%s\n", buf.String())
 
 	// expand env vars if any
-	yamlFile := []byte(os.ExpandEnv(buf.String()))
-	err = yaml.UnmarshalStrict(yamlFile, c.Config)
+	yamlFile, err := envsubst.Bytes(buf.Bytes())
 	if err != nil {
 		return err
+	}
+	err = yaml.UnmarshalStrict(yamlFile, c.Config)
+	if err != nil {
+		return fmt.Errorf("%w\nConsult with release notes to see if any fields were changed/removed", err)
 	}
 
 	c.Config.Topology.ImportEnvs()
 
-	c.TopoFile = &TopoFile{
-		path:     topoAbsPath,
-		dir:      topoDir,
-		fullName: fileBase,
-		name:     strings.TrimSuffix(fileBase, path.Ext(fileBase)),
-	}
 	return nil
 }
 
@@ -127,7 +108,7 @@ func readTemplateVariables(topo, varsFile string) (interface{}, error) {
 		return nil, nil
 	}
 READFILE:
-	data, err := ioutil.ReadFile(varsFile)
+	data, err := os.ReadFile(varsFile)
 	if err != nil {
 		return nil, err
 	}

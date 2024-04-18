@@ -6,10 +6,19 @@ package nodes
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"regexp"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/srl-labs/containerlab/cert"
+	"github.com/srl-labs/containerlab/clab/exec"
+	"github.com/srl-labs/containerlab/links"
+	"github.com/srl-labs/containerlab/nodes/state"
 	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -21,18 +30,15 @@ const (
 	SandboxKey = "sandbox"
 )
 
-var NodeKind string
+var (
+	// a map of node kinds overriding the default global runtime.
+	NonDefaultRuntimes = map[string]string{}
 
-const (
-	NodeKindBridge = "bridge"
-
-	NodeKindHOST = "host"
-	NodeKindOVS  = "ovs-bridge"
-	NodeKindSRL  = "srl"
+	// ErrCommandExecError is an error returned when a command is failed to execute on a given node.
+	ErrCommandExecError = errors.New("command execution error")
+	// ErrContainersNotFound indicated that for a given node no containers where found in the runtime.
+	ErrContainersNotFound = errors.New("containers not found")
 )
-
-// a map of node kinds overriding the default global runtime.
-var NonDefaultRuntimes = map[string]string{}
 
 // SetNonDefaultRuntimePerKind sets a non default runtime for kinds that requires that (see cvx).
 func SetNonDefaultRuntimePerKind(kindnames []string, runtime string) error {
@@ -45,29 +51,66 @@ func SetNonDefaultRuntimePerKind(kindnames []string, runtime string) error {
 	return nil
 }
 
-type Node interface {
-	Init(*types.NodeConfig, ...NodeOption) error
-	Config() *types.NodeConfig
-	PreDeploy(configName, labCADir, labCARoot string) error
-	Deploy(context.Context) error
-	PostDeploy(context.Context, map[string]Node) error
-	WithMgmtNet(*types.MgmtNet)
-	WithRuntime(runtime.ContainerRuntime)
-	SaveConfig(context.Context) error
-	Delete(context.Context) error
-	GetImages() map[string]string
-	GetRuntime() runtime.ContainerRuntime
+type PreDeployParams struct {
+	Cert         *cert.Cert
+	TopologyName string
+	TopoPaths    *types.TopoPaths
+	SSHPubKeys   []ssh.PublicKey
 }
 
-// Nodes is a map of all supported kinds and their init functions.
-var Nodes = map[string]Initializer{}
+// DeployParams contains parameters for the Deploy function.
+type DeployParams struct{}
 
-type Initializer func() Node
+// PostDeployParams contains parameters for the PostDeploy function.
+type PostDeployParams struct {
+	Nodes map[string]Node
+}
 
-func Register(names []string, initFn Initializer) {
-	for _, name := range names {
-		Nodes[name] = initFn
-	}
+// Node is an interface that defines the behavior of a node.
+type Node interface {
+	Init(*types.NodeConfig, ...NodeOption) error
+	// GetContainers returns a pointer to GenericContainer that the node uses.
+	GetContainers(ctx context.Context) ([]runtime.GenericContainer, error)
+	DeleteNetnsSymlink() (err error)
+	Config() *types.NodeConfig // Config returns the nodes configuration
+	// CheckDeploymentConditions checks if node-scoped deployment conditions are met.
+	CheckDeploymentConditions(context.Context) error
+	PreDeploy(ctx context.Context, params *PreDeployParams) error
+	Deploy(context.Context, *DeployParams) error // Deploy triggers the deployment of this node
+	PostDeploy(ctx context.Context, params *PostDeployParams) error
+	WithMgmtNet(*types.MgmtNet)           // WithMgmtNet provides the management network for the node
+	WithRuntime(runtime.ContainerRuntime) // WithRuntime provides the runtime for the node
+	// CheckInterfaceName checks if a name of the interface referenced in the topology file is correct for this node
+	CheckInterfaceName() error
+	// VerifyStartupConfig checks for existence of the referenced file and maybe performs additional config checks
+	VerifyStartupConfig(topoDir string) error
+	SaveConfig(context.Context) error            // SaveConfig saves the nodes configuration to an external file
+	Delete(context.Context) error                // Delete triggers the deletion of this node
+	GetImages(context.Context) map[string]string // GetImages returns the images used for this kind
+	GetRuntime() runtime.ContainerRuntime        // GetRuntime returns the nodes assigned runtime
+	GenerateConfig(dst, templ string) error      // Generate the nodes configuration
+	// UpdateConfigWithRuntimeInfo updates node config with runtime info like IP addresses assigned by runtime
+	UpdateConfigWithRuntimeInfo(context.Context) error
+	// RunExec execute a single command for a given node.
+	RunExec(ctx context.Context, execCmd *exec.ExecCmd) (*exec.ExecResult, error)
+	// Adds the given link to the Node (container). After adding the Link to the node,
+	// the given function f is called within the Nodes namespace to setup the link.
+	AddLinkToContainer(ctx context.Context, link netlink.Link, f func(ns.NetNS) error) error
+	AddEndpoint(e links.Endpoint)
+	GetEndpoints() []links.Endpoint
+	GetLinkEndpointType() links.LinkEndpointType
+	GetShortName() string
+	// DeployEndpoints deploys the links for the node.
+	DeployEndpoints(ctx context.Context) error
+	// ExecFunction executes the given function within the nodes network namespace
+	ExecFunction(context.Context, func(ns.NetNS) error) error
+	GetState() state.NodeState
+	SetState(state.NodeState)
+	GetSSHConfig() *types.SSHConfig
+	// RunExecFromConfig executes the topologyfile defined exec commands
+	RunExecFromConfig(context.Context, *exec.ExecCollection) error
+	IsHealthy(ctx context.Context) (bool, error)
+	GetContainerStatus(ctx context.Context) runtime.ContainerStatus
 }
 
 type NodeOption func(Node)
@@ -88,32 +131,15 @@ func WithRuntime(r runtime.ContainerRuntime) NodeOption {
 	}
 }
 
-var DefaultConfigTemplates = map[string]string{
-	"vr-sros": "",
-}
-
-// DefaultCredentials holds default username and password per each kind.
-var defaultCredentials = map[string][]string{}
-
-// SetDefaultCredentials register default credentials per provided kindname.
-func SetDefaultCredentials(kindnames []string, user, password string) error {
-	// iterate over the kindnames
-	for _, kindname := range kindnames {
-		// check the default credentials for the kindname is not yet already registed
-		if _, exists := defaultCredentials[kindname]; exists {
-			return fmt.Errorf("kind with the name '%s' exists already", kindname)
+// GenericVMInterfaceCheck checks interface names for generic VM-based nodes.
+// These nodes could only have interfaces named ethX, where X is >0.
+func GenericVMInterfaceCheck(nodeName string, eps []links.Endpoint) error {
+	ifRe := regexp.MustCompile(`eth[1-9][0-9]*$`)
+	for _, e := range eps {
+		if !ifRe.MatchString(e.GetIfaceName()) {
+			return fmt.Errorf("%q interface name %q doesn't match the required pattern. It should be named as ethX, where X is >0", nodeName, e.GetIfaceName())
 		}
-		// register the credentials
-		defaultCredentials[kindname] = []string{user, password}
 	}
-	return nil
-}
 
-// GetDefaultCredentialsForKind retrieve the default credentials for a certain kind
-// the first element in the slice is the Username, the second is the password.
-func GetDefaultCredentialsForKind(kind string) ([]string, error) {
-	if _, exists := defaultCredentials[kind]; !exists {
-		return nil, fmt.Errorf("default credentials entry for kind %s does not exist", kind)
-	}
-	return defaultCredentials[kind], nil
+	return nil
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/srl-labs/containerlab/nodes"
+	"github.com/srl-labs/containerlab/clab"
 	"github.com/srl-labs/containerlab/types"
 )
 
@@ -22,6 +22,7 @@ const (
 	vkManagementIPv4 = "clab_management_ipv4" // reserved, management IPv4 of the node
 	vkManagementIPv6 = "clab_management_ipv6" // reserved, management IPv6 of the node
 	vkKind           = "clab_kind"            // reserved, will contain the node kind
+	vkType           = "clab_type"            // reserved, will contain the node type
 
 	vkSystemIP = "clab_system_ip" // optional, system IP if present could be used to calc link IPs
 	vkLinkIP   = "clab_link_ip"   // optional, link IP
@@ -31,12 +32,12 @@ const (
 
 type Dict map[string]interface{}
 
-// Prepare variables for all nodes. This will also prepare all variables for the links.
-func PrepareVars(nodes map[string]nodes.Node, links map[int]*types.Link) map[string]*NodeConfig {
+// PrepareVars variables for all nodes. This will also prepare all variables for the links.
+func PrepareVars(c *clab.CLab) map[string]*NodeConfig {
 	res := make(map[string]*NodeConfig)
 
 	// preparing all nodes vars
-	for _, node := range nodes {
+	for _, node := range c.Nodes {
 		nodeCfg := node.Config()
 		name := nodeCfg.ShortName
 		vars := make(map[string]interface{})
@@ -44,6 +45,7 @@ func PrepareVars(nodes map[string]nodes.Node, links map[int]*types.Link) map[str
 		vars[vkKind] = nodeCfg.Kind
 		vars[vkManagementIPv4] = nodeCfg.MgmtIPv4Address
 		vars[vkManagementIPv6] = nodeCfg.MgmtIPv6Address
+		vars[vkType] = nodeCfg.NodeType
 
 		// Init array for this node
 		for key, val := range nodeCfg.Config.Vars {
@@ -62,25 +64,28 @@ func PrepareVars(nodes map[string]nodes.Node, links map[int]*types.Link) map[str
 			vars[vkRole] = nodeCfg.Kind
 		}
 
+		creds := c.Reg.Kind(nodeCfg.Kind).Credentials().Slice()
+
 		res[name] = &NodeConfig{
-			TargetNode: nodeCfg,
-			Vars:       vars,
+			TargetNode:  nodeCfg,
+			Vars:        vars,
+			Credentials: creds,
 		}
 	}
 
-	// prepare all links
-	for lIdx, link := range links {
-		varsA := make(Dict)
-		varsB := make(Dict)
-		err := prepareLinkVars(link, varsA, varsB)
-		if err != nil {
-			log.Errorf("cannot prepare link vars for %d. %s: %s", lIdx, link.String(), err)
-		}
-		res[link.A.Node.ShortName].Vars[vkLinks] =
-			append(res[link.A.Node.ShortName].Vars[vkLinks].([]interface{}), varsA)
-		res[link.B.Node.ShortName].Vars[vkLinks] =
-			append(res[link.B.Node.ShortName].Vars[vkLinks].([]interface{}), varsB)
-	}
+	// // prepare all links
+	// for lIdx, link := range c.Links {
+	// 	varsA := make(Dict)
+	// 	varsB := make(Dict)
+	// 	err := prepareLinkVars(link, varsA, varsB)
+	// 	if err != nil {
+	// 		log.Errorf("cannot prepare link vars for %d. %s: %s", lIdx, link.String(), err)
+	// 	}
+	// 	res[link.A.Node.ShortName].Vars[vkLinks] =
+	// 		append(res[link.A.Node.ShortName].Vars[vkLinks].([]interface{}), varsA)
+	// 	res[link.B.Node.ShortName].Vars[vkLinks] =
+	// 		append(res[link.B.Node.ShortName].Vars[vkLinks].([]interface{}), varsB)
+	// }
 
 	// Prepare top-level map of nodes
 	// copy 1-level deep

@@ -34,7 +34,7 @@ detectOS() {
     # Minimalist GNU for Windows
     mingw*) OS='windows' ;;
     esac
-    
+
     if [ -f /etc/os-release ]; then
         OS_ID="$(. /etc/os-release && echo "$ID")"
     fi
@@ -42,11 +42,14 @@ detectOS() {
         ubuntu|debian|raspbian)
             PKG_FORMAT="deb"
         ;;
-        
+
         centos|rhel|sles)
             PKG_FORMAT="rpm"
         ;;
-        
+
+        alpine)
+            PKG_FORMAT="apk"
+        ;;
         *)
             if type "rpm" &>/dev/null; then
                 PKG_FORMAT="rpm"
@@ -97,16 +100,30 @@ verifyOpenssl() {
 # or to the latest release available on github releases
 setDesiredVersion() {
     if [ "x$DESIRED_VERSION" == "x" ]; then
+        # check if GITHUB_TOKEN env var is set and use it for API calls
+        local gh_token=${GITHUB_TOKEN:-}
+        if [ ! -z "$gh_token" ]; then
+            local curl_auth_header=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+            local wget_auth_header=(--header="Authorization: Bearer ${GITHUB_TOKEN}")
+        fi
         # when desired version is not provided
         # get latest tag from the gh releases
         if type "curl" &>/dev/null; then
-            local latest_release_url=$(curl -s https://api.github.com/repos/$REPO_NAME/releases/latest | sed '5q;d' | cut -d '"' -f 4)
+            local latest_release_url=$(curl -s "${curl_auth_header[@]}" https://api.github.com/repos/$REPO_NAME/releases/latest | sed '5q;d' | cut -d '"' -f 4)
+            if [ -z "$latest_release_url" ]; then
+                echo "Failed to retrieve latest release URL due to rate limiting. Please provide env var GITHUB_TOKEN with your GitHub personal access token."
+                exit 1
+            fi
             TAG=$(echo $latest_release_url | cut -d '"' -f 2 | awk -F "/" '{print $NF}')
             # tag with stripped `v` prefix
             TAG_WO_VER=$(echo "${TAG}" | cut -c 2-)
         elif type "wget" &>/dev/null; then
             # get latest release info and get 5th line out of the response to get the URL
-            local latest_release_url=$(wget -q https://api.github.com/repos/$REPO_NAME/releases/latest -O- | sed '5q;d' | cut -d '"' -f 4)
+            local latest_release_url=$(wget -q "${wget_auth_header[@]}" https://api.github.com/repos/$REPO_NAME/releases/latest -O- | sed '5q;d' | cut -d '"' -f 4)
+            if [ -z "$latest_release_url" ]; then
+                echo "Failed to retrieve latest release URL due to rate limiting. Please provide env var GITHUB_TOKEN with your GitHub personal access token."
+                exit 1
+            fi
             TAG=$(echo $latest_release_url | cut -d '"' -f 2 | awk -F "/" '{print $NF}')
             TAG_WO_VER=$(echo "${TAG}" | cut -c 2-)
         fi
@@ -128,6 +145,24 @@ setDesiredVersion() {
     fi
 }
 
+# docsLinkFromVer returns the url portion for release notes
+# based on the Go docsLinkFromVer() function in version.go
+docsLinkFromVer() {
+  ver=$1
+  IFS='.' read -ra segments <<< "$ver"
+  maj=${segments[0]}
+  min=${segments[1]}
+  patch=${segments[2]}
+
+  relSlug="$maj.$min/"
+  if [ -n "$patch" ]; then
+    if [ "$patch" -ne 0 ]; then
+      relSlug="$relSlug#$maj$min$patch"
+    fi
+  fi
+  echo "$relSlug"
+}
+
 # checkInstalledVersion checks which version is installed and
 # if it needs to be changed.
 checkInstalledVersion() {
@@ -137,18 +172,36 @@ checkInstalledVersion() {
             echo "${BINARY_NAME} is already at its ${DESIRED_VERSION:-latest ($version)}" version
             return 0
         else
-            echo "A newer ${BINARY_NAME} ${TAG_WO_VER} is available. Release notes: https://containerlab.dev/rn/${TAG_WO_VER}"
-            echo "You are running containerlab $version version"
-            UPGR_NEEDED="Y"
-            # check if stdin is open (i.e. capable of getting users input)
-            if [ -t 0 ]; then
-                read -e -p "Proceed with upgrade? [Y/n]: " -i "Y" UPGR_NEEDED
+            if [ "$(printf '%s\n' "$TAG_WO_VER" "$version" | sort -V | head -n1)" = "$TAG_WO_VER" ]; then
+                RN_VER=$(docsLinkFromVer $TAG_WO_VER)
+                echo "A newer ${BINARY_NAME} version $version is already installed"
+                echo "You are running ${BINARY_NAME} version $version"
+                echo "You are trying to downgrade to ${BINARY_NAME} version ${TAG_WO_VER}"
+                echo "Release notes: https://containerlab.dev/rn/${RN_VER}"
+                UPGR_NEEDED="Y"
+                # check if stdin is open (i.e. capable of getting users input)
+                if [ -t 0 ]; then
+                    read -e -p "Proceed with downgrade? [Y/n]: " -i "Y" UPGR_NEEDED
+                fi
+                if [ "$UPGR_NEEDED" == "Y" ]; then
+                    return 1
+                fi
+                return 0
+            else
+                RN_VER=$(docsLinkFromVer $TAG_WO_VER)
+                echo "A newer ${BINARY_NAME} ${TAG_WO_VER} is available. Release notes: https://containerlab.dev/rn/${RN_VER}"
+                echo "You are running containerlab $version version"
+                UPGR_NEEDED="Y"
+                # check if stdin is open (i.e. capable of getting users input)
+                if [ -t 0 ]; then
+                    read -e -p "Proceed with upgrade? [Y/n]: " -i "Y" UPGR_NEEDED
+                fi
+                if [ "$UPGR_NEEDED" == "Y" ]; then
+                    return 1
+                fi
+                return 0
             fi
-            if [ "$UPGR_NEEDED" == "Y" ]; then
-                return 1
-            fi
-            return 0
-        fi
+          fi
     else
         return 1
     fi
@@ -204,12 +257,27 @@ installFile() {
 # installPkg installs the downloaded version of a package in a deb or rpm format
 installPkg() {
     echo "Preparing to install $BINARY_NAME ${TAG_WO_VER} from package"
+    runAsRoot $PKG_INSTALLER $TMP_FILE
+}
+
+# setPkgInstaller deduces the pkg installation command
+setPkgInstaller() {
     if [ $PKG_FORMAT == "deb" ]; then
-        runAsRoot dpkg -i $TMP_FILE
+        PKG_INSTALLER="dpkg -i"
+    elif [ $PKG_FORMAT == "apk" ]; then
+        PKG_INSTALLER="apk add --allow-untrusted"
     elif [ $PKG_FORMAT == "rpm" ]; then
-        runAsRoot rpm -U $TMP_FILE
+        if [ -f /etc/os-release ]; then
+            VARIANT_ID="$(. /etc/os-release && echo "$VARIANT_ID")"
+        fi
+        if [[ -n "$VARIANT_ID" && $VARIANT_ID == "coreos" ]]; then
+            PKG_INSTALLER="rpm-ostree install --uninstall=containerlab --idempotent"
+        else
+            PKG_INSTALLER="rpm -U --oldpackage"
+        fi
     fi
 }
+
 
 # fail_trap is executed if an error occurs.
 fail_trap() {
@@ -229,6 +297,13 @@ fail_trap() {
 
 # testVersion tests the installed client to make sure it is working.
 testVersion() {
+    if [ -f /etc/os-release ]; then
+        # CoreOS requires a reboot for the new layers to become active, hence the binary is not yet available
+        VARIANT_ID="$(. /etc/os-release && echo "$VARIANT_ID")"
+        if [[ -n "$VARIANT_ID" && $VARIANT_ID == "coreos" ]]; then
+            exit 0
+        fi
+    fi
     set +e
     $BIN_INSTALL_DIR/$BINARY_NAME version
     if [ "$?" = "1" ]; then
@@ -306,6 +381,7 @@ if ! checkInstalledVersion; then
     verifyOpenssl
     downloadFile
     if [ $USE_PKG == "true" ]; then
+        setPkgInstaller
         installPkg
     else
         installFile

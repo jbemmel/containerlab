@@ -19,23 +19,46 @@ func TestGenerateAnsibleInventory(t *testing.T) {
 		"case1": {
 			got: "test_data/topo1.yml",
 			want: `all:
+  vars:
+    # The generated inventory is assumed to be used from the clab host.
+    # Hence no http proxy should be used. Therefore we make sure the http
+    # module does not attempt using any global http proxy.
+    ansible_httpapi_use_proxy: false
   children:
-    srl:
+    nokia_srlinux:
+      vars:
+        ansible_network_os: nokia.srlinux.srlinux
+        # default connection type for nodes of this kind
+        # feel free to override this in your inventory
+        ansible_connection: ansible.netcommon.httpapi
+        ansible_user: admin
+        ansible_password: NokiaSrl1!
       hosts:
         clab-topo1-node1:
           ansible_host: 172.100.100.11
         clab-topo1-node2:
-          ansible_host: 172.100.100.12
-`,
+          ansible_host: 172.100.100.12`,
 		},
 		"case2": {
 			got: "test_data/topo8_ansible_groups.yml",
 			want: `all:
+  vars:
+    # The generated inventory is assumed to be used from the clab host.
+    # Hence no http proxy should be used. Therefore we make sure the http
+    # module does not attempt using any global http proxy.
+    ansible_httpapi_use_proxy: false
   children:
     linux:
       hosts:
         clab-topo8_ansible_groups-node4:
-    srl:
+    nokia_srlinux:
+      vars:
+        ansible_network_os: nokia.srlinux.srlinux
+        # default connection type for nodes of this kind
+        # feel free to override this in your inventory
+        ansible_connection: ansible.netcommon.httpapi
+        ansible_user: admin
+        ansible_password: NokiaSrl1!
       hosts:
         clab-topo8_ansible_groups-node1:
           ansible_host: 172.100.100.11
@@ -52,15 +75,14 @@ func TestGenerateAnsibleInventory(t *testing.T) {
     spine:
       hosts:
         clab-topo8_ansible_groups-node1:
-          ansible_host: 172.100.100.11
-`,
+          ansible_host: 172.100.100.11`,
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
-				WithTopoFile(tc.got, ""),
+				WithTopoPath(tc.got, ""),
 			}
 			c, err := NewContainerLab(opts...)
 			if err != nil {
@@ -73,8 +95,8 @@ func TestGenerateAnsibleInventory(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if !cmp.Equal(s.String(), tc.want) {
-				t.Errorf("failed at '%s', expected\n%v, got\n%+v", name, tc.want, s.String())
+			if diff := cmp.Diff(tc.want, s.String()); diff != "" {
+				t.Errorf("failed at '%s', diff: (-want +got)\n%s", name, diff)
 			}
 		})
 	}

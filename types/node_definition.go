@@ -3,6 +3,9 @@ package types
 import (
 	"os"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -11,20 +14,21 @@ const (
 
 // NodeDefinition represents a configuration a given node can have in the lab definition file.
 type NodeDefinition struct {
-	Kind                 string            `yaml:"kind,omitempty"`
-	Group                string            `yaml:"group,omitempty"`
-	Type                 string            `yaml:"type,omitempty"`
-	StartupConfig        string            `yaml:"startup-config,omitempty"`
-	StartupDelay         uint              `yaml:"startup-delay,omitempty"`
-	EnforceStartupConfig bool              `yaml:"enforce-startup-config,omitempty"`
-	Config               *ConfigDispatcher `yaml:"config,omitempty"`
-	Image                string            `yaml:"image,omitempty"`
-	License              string            `yaml:"license,omitempty"`
-	Position             string            `yaml:"position,omitempty"`
-	Entrypoint           string            `yaml:"entrypoint,omitempty"`
-	Cmd                  string            `yaml:"cmd,omitempty"`
-	// list of subject Alternative Names (SAN) to be added to the node's certificate
-	SANs []string `yaml:"SANs,omitempty"`
+	Kind                  string            `yaml:"kind,omitempty"`
+	Group                 string            `yaml:"group,omitempty"`
+	Type                  string            `yaml:"type,omitempty"`
+	StartupConfig         string            `yaml:"startup-config,omitempty"`
+	StartupDelay          uint              `yaml:"startup-delay,omitempty"`
+	EnforceStartupConfig  *bool             `yaml:"enforce-startup-config,omitempty"`
+	SuppressStartupConfig *bool             `yaml:"suppress-startup-config,omitempty"`
+	AutoRemove            *bool             `yaml:"auto-remove,omitempty"`
+	Config                *ConfigDispatcher `yaml:"config,omitempty"`
+	Image                 string            `yaml:"image,omitempty"`
+	ImagePullPolicy       string            `yaml:"image-pull-policy,omitempty"`
+	License               string            `yaml:"license,omitempty"`
+	Position              string            `yaml:"position,omitempty"`
+	Entrypoint            string            `yaml:"entrypoint,omitempty"`
+	Cmd                   string            `yaml:"cmd,omitempty"`
 	// list of commands to run in container
 	Exec []string `yaml:"exec,omitempty"`
 	// list of bind mount compatible strings
@@ -32,9 +36,9 @@ type NodeDefinition struct {
 	// list of port bindings
 	Ports []string `yaml:"ports,omitempty"`
 	// user-defined IPv4 address in the management network
-	MgmtIPv4 string `yaml:"mgmt_ipv4,omitempty"`
+	MgmtIPv4 string `yaml:"mgmt-ipv4,omitempty"`
 	// user-defined IPv6 address in the management network
-	MgmtIPv6 string `yaml:"mgmt_ipv6,omitempty"`
+	MgmtIPv6 string `yaml:"mgmt-ipv6,omitempty"`
 	// list of ports to publish with mysocketctl
 	Publish []string `yaml:"publish,omitempty"`
 	// environment variables
@@ -62,6 +66,51 @@ type NodeDefinition struct {
 	Sysctls map[string]string `yaml:"sysctls,omitempty"`
 	// Extra options, may be kind specific
 	Extras *Extras `yaml:"extras,omitempty"`
+	// Deployment stages
+	Stages *Stages `yaml:"stages,omitempty"`
+	// DNS configuration
+	DNS *DNSConfig `yaml:"dns,omitempty"`
+	// Certificate configuration
+	Certificate *CertificateConfig `yaml:"certificate,omitempty"`
+	// Healthcheck configuration
+	HealthCheck *HealthcheckConfig `yaml:"healthcheck,omitempty"`
+}
+
+// Interface compliance.
+var _ yaml.Unmarshaler = &NodeDefinition{}
+
+// UnmarshalYAML is a custom unmarshaller for NodeDefinition type that allows to map old attributes to new ones.
+func (n *NodeDefinition) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// define an alias type to avoid recursion during unmarshalling
+	type NodeDefinitionAlias NodeDefinition
+
+	type NodeDefinitionWithDeprecatedFields struct {
+		NodeDefinitionAlias `yaml:",inline"`
+		DeprecatedMgmtIPv4  string `yaml:"mgmt_ipv4,omitempty"`
+		DeprecatedMgmtIPv6  string `yaml:"mgmt_ipv6,omitempty"`
+	}
+
+	nd := &NodeDefinitionWithDeprecatedFields{}
+
+	nd.NodeDefinitionAlias = (NodeDefinitionAlias)(*n)
+	if err := unmarshal(nd); err != nil {
+		return err
+	}
+
+	// process deprecated fields and use their values for new fields if new fields are not set
+	if len(nd.DeprecatedMgmtIPv4) > 0 && len(nd.MgmtIPv4) == 0 {
+		log.Warnf("Attribute \"mgmt_ipv4\" is deprecated and will be removed in future. Change it to \"mgmt-ipv4\"")
+		nd.MgmtIPv4 = nd.DeprecatedMgmtIPv4
+	}
+
+	if len(nd.DeprecatedMgmtIPv6) > 0 && len(nd.MgmtIPv6) == 0 {
+		log.Warnf("Attribute \"mgmt_ipv6\" is deprecated and will be removed in future. Change it to \"mgmt-ipv6\"")
+		nd.MgmtIPv6 = nd.DeprecatedMgmtIPv6
+	}
+
+	*n = (NodeDefinition)(nd.NodeDefinitionAlias)
+
+	return nil
 }
 
 func (n *NodeDefinition) GetKind() string {
@@ -99,11 +148,25 @@ func (n *NodeDefinition) GetStartupDelay() uint {
 	return n.StartupDelay
 }
 
-func (n *NodeDefinition) GetEnforceStartupConfig() bool {
+func (n *NodeDefinition) GetEnforceStartupConfig() *bool {
 	if n == nil {
-		return false
+		return nil
 	}
 	return n.EnforceStartupConfig
+}
+
+func (n *NodeDefinition) GetSuppressStartupConfig() *bool {
+	if n == nil {
+		return nil
+	}
+	return n.SuppressStartupConfig
+}
+
+func (n *NodeDefinition) GetAutoRemove() *bool {
+	if n == nil {
+		return nil
+	}
+	return n.AutoRemove
 }
 
 func (n *NodeDefinition) GetConfigDispatcher() *ConfigDispatcher {
@@ -118,6 +181,13 @@ func (n *NodeDefinition) GetImage() string {
 		return ""
 	}
 	return n.Image
+}
+
+func (n *NodeDefinition) GetImagePullPolicy() string {
+	if n == nil {
+		return ""
+	}
+	return n.ImagePullPolicy
 }
 
 func (n *NodeDefinition) GetLicense() string {
@@ -282,11 +352,32 @@ func (n *NodeDefinition) GetExtras() *Extras {
 	return n.Extras
 }
 
-func (n *NodeDefinition) GetSANs() []string {
+func (n *NodeDefinition) GetStages() *Stages {
 	if n == nil {
 		return nil
 	}
-	return n.SANs
+	return n.Stages
+}
+
+func (n *NodeDefinition) GetDns() *DNSConfig {
+	if n == nil {
+		return nil
+	}
+	return n.DNS
+}
+
+func (n *NodeDefinition) GetCertificateConfig() *CertificateConfig {
+	if n == nil {
+		return nil
+	}
+	return n.Certificate
+}
+
+func (n *NodeDefinition) GetHealthcheckConfig() *HealthcheckConfig {
+	if n == nil {
+		return nil
+	}
+	return n.HealthCheck
 }
 
 // ImportEnvs imports all environment variales defined in the shell

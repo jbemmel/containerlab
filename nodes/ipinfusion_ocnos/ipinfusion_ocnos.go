@@ -11,104 +11,80 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/netconf"
 	"github.com/srl-labs/containerlab/nodes"
-	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
 	"github.com/srl-labs/containerlab/utils"
 )
 
-var kindnames = []string{"ipinfusion_ocnos"}
+var (
+	kindnames          = []string{"ipinfusion_ocnos"}
+	defaultCredentials = nodes.NewCredentials("admin", "admin")
+)
 
 const (
 	scrapliPlatformName = "ipinfusion_ocnos"
-	defaultUser         = "admin"
-	defaultPassword     = "admin"
 )
 
-func init() {
-	nodes.Register(kindnames, func() nodes.Node {
+// Register registers the node in the NodeRegistry.
+func Register(r *nodes.NodeRegistry) {
+	r.Register(kindnames, func() nodes.Node {
 		return new(IPInfusionOcNOS)
-	})
-	err := nodes.SetDefaultCredentials(kindnames, defaultUser, defaultPassword)
-	if err != nil {
-		log.Error(err)
-	}
+	}, defaultCredentials)
 }
 
 type IPInfusionOcNOS struct {
-	cfg     *types.NodeConfig
-	mgmt    *types.MgmtNet
-	runtime runtime.ContainerRuntime
+	nodes.DefaultNode
 }
 
-func (s *IPInfusionOcNOS) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
-	s.cfg = cfg
+func (n *IPInfusionOcNOS) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
+	// Init DefaultNode
+	n.DefaultNode = *nodes.NewDefaultNode(n)
+	// set virtualization requirement
+	n.HostRequirements.VirtRequired = true
+
+	n.Cfg = cfg
 	for _, o := range opts {
-		o(s)
+		o(n)
 	}
 	// env vars are used to set launch.py arguments in vrnetlab container
 	defEnv := map[string]string{
 		"CONNECTION_MODE":    nodes.VrDefConnMode,
-		"USERNAME":           defaultUser,
-		"PASSWORD":           defaultPassword,
-		"DOCKER_NET_V4_ADDR": s.mgmt.IPv4Subnet,
-		"DOCKER_NET_V6_ADDR": s.mgmt.IPv6Subnet,
+		"USERNAME":           defaultCredentials.GetUsername(),
+		"PASSWORD":           defaultCredentials.GetPassword(),
+		"DOCKER_NET_V4_ADDR": n.Mgmt.IPv4Subnet,
+		"DOCKER_NET_V6_ADDR": n.Mgmt.IPv6Subnet,
 	}
-	s.cfg.Env = utils.MergeStringMaps(defEnv, s.cfg.Env)
+	n.Cfg.Env = utils.MergeStringMaps(defEnv, n.Cfg.Env)
 
-	s.cfg.Cmd = fmt.Sprintf("--username %s --password %s --hostname %s --connection-mode %s --trace",
-		s.cfg.Env["USERNAME"], s.cfg.Env["PASSWORD"], s.cfg.ShortName, s.cfg.Env["CONNECTION_MODE"])
-
-	// set virtualization requirement
-	s.cfg.HostRequirements.VirtRequired = true
+	n.Cfg.Cmd = fmt.Sprintf("--username %s --password %s --hostname %s --connection-mode %s --trace",
+		n.Cfg.Env["USERNAME"], n.Cfg.Env["PASSWORD"], n.Cfg.ShortName, n.Cfg.Env["CONNECTION_MODE"])
 
 	return nil
 }
 
-func (s *IPInfusionOcNOS) Config() *types.NodeConfig { return s.cfg }
-
-func (s *IPInfusionOcNOS) PreDeploy(_, _, _ string) error {
-	utils.CreateDirectory(s.cfg.LabDir, 0777)
-	return nil
-}
-
-func (s *IPInfusionOcNOS) Deploy(ctx context.Context) error {
-	cID, err := s.runtime.CreateContainer(ctx, s.cfg)
+func (s *IPInfusionOcNOS) PreDeploy(_ context.Context, params *nodes.PreDeployParams) error {
+	utils.CreateDirectory(s.Cfg.LabDir, 0777)
+	_, err := s.LoadOrGenerateCertificate(params.Cert, params.TopologyName)
 	if err != nil {
-		return err
+		return nil
 	}
-	_, err = s.runtime.StartContainer(ctx, cID, s.cfg)
-	return err
-}
-
-func (*IPInfusionOcNOS) PostDeploy(_ context.Context, _ map[string]nodes.Node) error {
 	return nil
 }
 
-func (s *IPInfusionOcNOS) GetImages() map[string]string {
-	return map[string]string{
-		nodes.ImageKey: s.cfg.Image,
-	}
-}
-
-func (*IPInfusionOcNOS) Destroy(_ context.Context) error          { return nil }
-func (s *IPInfusionOcNOS) WithMgmtNet(mgmt *types.MgmtNet)        { s.mgmt = mgmt }
-func (s *IPInfusionOcNOS) WithRuntime(r runtime.ContainerRuntime) { s.runtime = r }
-func (s *IPInfusionOcNOS) GetRuntime() runtime.ContainerRuntime   { return s.runtime }
-
-func (s *IPInfusionOcNOS) Delete(ctx context.Context) error {
-	return s.runtime.DeleteContainer(ctx, s.cfg.LongName)
-}
-
-func (s *IPInfusionOcNOS) SaveConfig(_ context.Context) error {
-	err := netconf.SaveConfig(s.cfg.LongName,
-		defaultUser,
-		defaultPassword,
+func (n *IPInfusionOcNOS) SaveConfig(_ context.Context) error {
+	err := netconf.SaveConfig(n.Cfg.LongName,
+		defaultCredentials.GetUsername(),
+		defaultCredentials.GetPassword(),
 		scrapliPlatformName,
 	)
 	if err != nil {
 		return err
 	}
 
-	log.Infof("saved %s running configuration to startup configuration file\n", s.cfg.ShortName)
+	log.Infof("saved %s running configuration to startup configuration file\n", n.Cfg.ShortName)
 	return nil
+}
+
+// CheckInterfaceName checks if a name of the interface referenced in the topology file correct.
+func (n *IPInfusionOcNOS) CheckInterfaceName() error {
+	return nodes.GenericVMInterfaceCheck(n.Cfg.ShortName, n.Endpoints)
 }

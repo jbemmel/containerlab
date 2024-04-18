@@ -8,18 +8,21 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/containers/podman/v4/pkg/api/handlers"
-	"github.com/containers/podman/v4/pkg/bindings/containers"
-	"github.com/containers/podman/v4/pkg/bindings/images"
-	"github.com/containers/podman/v4/pkg/bindings/network"
+	"github.com/containers/podman/v5/pkg/api/handlers"
+	"github.com/containers/podman/v5/pkg/bindings/containers"
+	"github.com/containers/podman/v5/pkg/bindings/images"
+	"github.com/containers/podman/v5/pkg/bindings/network"
 	dockerTypes "github.com/docker/docker/api/types"
 	log "github.com/sirupsen/logrus"
+	"github.com/srl-labs/containerlab/clab/exec"
+	"github.com/srl-labs/containerlab/links"
 	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
+	"github.com/srl-labs/containerlab/utils"
 )
 
 const (
-	runtimeName    = "podman"
+	RuntimeName    = "podman"
 	defaultTimeout = 120 * time.Second
 )
 
@@ -29,7 +32,7 @@ type PodmanRuntime struct {
 }
 
 func init() {
-	runtime.Register(runtimeName, func() runtime.ContainerRuntime {
+	runtime.Register(RuntimeName, func() runtime.ContainerRuntime {
 		return &PodmanRuntime{
 			config: &runtime.RuntimeConfig{},
 			mgmt:   &types.MgmtNet{},
@@ -43,6 +46,9 @@ func (r *PodmanRuntime) Init(opts ...runtime.RuntimeOption) error {
 	for _, f := range opts {
 		f(r)
 	}
+	r.config.VerifyLinkParams = links.NewVerifyLinkParams()
+	r.config.VerifyLinkParams.RunBridgeExistsCheck = false
+
 	return nil
 }
 
@@ -97,7 +103,18 @@ func (r *PodmanRuntime) CreateNet(ctx context.Context) error {
 		}
 		log.Debugf("Trying to create mgmt network with params: %+v", netopts)
 		resp, err := network.Create(ctx, &netopts)
+		if err != nil {
+			return err
+		}
 		log.Debugf("Create network response was: %+v", resp)
+	}
+	// set bridge name = network name if explicit name was not provided
+	if r.mgmt.Bridge == "" && r.mgmt.Network != "" {
+		details, err := network.Inspect(ctx, r.mgmt.Network, &network.InspectOptions{})
+		if err != nil {
+			return err
+		}
+		r.mgmt.Bridge = details.NetworkInterface
 	}
 	return err
 }
@@ -113,27 +130,48 @@ func (r *PodmanRuntime) DeleteNet(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Debugf("Trying to delete mgmt network %v", r.mgmt.Network)
+	log.Debugf("trying to delete mgmt network %v", r.mgmt.Network)
 	_, err = network.Remove(ctx, r.mgmt.Network, &network.RemoveOptions{})
 	if err != nil {
-		return fmt.Errorf("Error while trying to remove a mgmt network %w", err)
+		return fmt.Errorf("error while trying to remove a mgmt network %w", err)
 	}
 	return nil
 }
 
-func (r *PodmanRuntime) PullImageIfRequired(ctx context.Context, image string) error {
+func (r *PodmanRuntime) PullImage(ctx context.Context, image string, pullPolicy types.PullPolicyValue) error {
 	ctx, err := r.connect(ctx)
 	if err != nil {
 		return err
 	}
+	// avoid short-hand image names
+	// https://www.redhat.com/sysadmin/container-image-short-names
+	canonicalImage := utils.GetCanonicalImageName(image)
+
 	// Check the existence
-	ex, err := images.Exists(ctx, image, &images.ExistsOptions{})
+	ex, err := images.Exists(ctx, canonicalImage, &images.ExistsOptions{})
 	if err != nil {
 		return err
 	}
+
+	if pullPolicy == types.PullPolicyNever {
+		if ex {
+			// image present, all good
+			log.Debugf("Image %s present, skip pulling", image)
+			return nil
+		} else {
+			// image not found but pull policy = never
+			return fmt.Errorf("image %s not found locally, but image-pull-policy is %s", image, pullPolicy)
+		}
+	}
+	if pullPolicy == types.PullPolicyIfNotPresent && ex == true {
+		// pull policy == IfNotPresent and image is present
+		log.Debugf("Image %s present, skip pulling", image)
+		return nil
+	}
+
 	// Pull the image if it doesn't exist
 	if !ex {
-		_, err = images.Pull(ctx, image, &images.PullOptions{})
+		_, err = images.Pull(ctx, canonicalImage, &images.PullOptions{})
 	}
 	return err
 }
@@ -154,11 +192,13 @@ func (r *PodmanRuntime) CreateContainer(ctx context.Context, cfg *types.NodeConf
 }
 
 // StartContainer starts a previously created container by ID or its name and executes post-start actions method.
-func (r *PodmanRuntime) StartContainer(ctx context.Context, cID string, cfg *types.NodeConfig) (interface{}, error) {
+func (r *PodmanRuntime) StartContainer(ctx context.Context, cID string, node runtime.Node) (interface{}, error) {
 	ctx, err := r.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
+	cfg := node.Config()
+
 	err = containers.Start(ctx, cID, &containers.StartOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("error while starting a container %q: %w", cfg.LongName, err)
@@ -192,11 +232,14 @@ func (r *PodmanRuntime) StopContainer(ctx context.Context, cID string) error {
 		return err
 	}
 	err = containers.Stop(ctx, cID, &containers.StopOptions{})
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 // ListContainers returns a list of all available containers in the system in a containerlab-specific struct.
-func (r *PodmanRuntime) ListContainers(ctx context.Context, filters []*types.GenericFilter) ([]types.GenericContainer, error) {
+func (r *PodmanRuntime) ListContainers(ctx context.Context, filters []*types.GenericFilter) ([]runtime.GenericContainer, error) {
 	ctx, err := r.connect(ctx)
 	if err != nil {
 		return nil, err
@@ -223,37 +266,50 @@ func (r *PodmanRuntime) GetNSPath(ctx context.Context, cID string) (string, erro
 	return nspath, nil
 }
 
-func (r *PodmanRuntime) Exec(ctx context.Context, cID string, cmd []string) (stdout []byte, stderr []byte, err error) {
-	ctx, err = r.connect(ctx)
+func (r *PodmanRuntime) Exec(ctx context.Context, cID string, execCmd *exec.ExecCmd) (*exec.ExecResult, error) {
+	ctx, err := r.connect(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	execCreateConf := handlers.ExecCreateConfig{
 		ExecConfig: dockerTypes.ExecConfig{
 			User:         "root",
 			AttachStderr: true,
 			AttachStdout: true,
-			Cmd:          cmd,
+			Cmd:          execCmd.GetCmd(),
 		},
 	}
 	execID, err := containers.ExecCreate(ctx, cID, &execCreateConf)
 	if err != nil {
 		log.Errorf("failed to create exec in container %q: %v", cID, err)
-		return nil, nil, err
+		return nil, err
 	}
 	var sOut, sErr podmanWriterCloser
 	execSAAOpts := new(containers.ExecStartAndAttachOptions).WithOutputStream(&sOut).WithErrorStream(
 		&sErr).WithAttachOutput(true).WithAttachError(true)
+
 	err = containers.ExecStartAndAttach(ctx, execID, execSAAOpts)
 	if err != nil {
 		log.Errorf("failed to start/attach exec in container %q: %v", cID, err)
-		return nil, nil, err
+		return nil, err
+	}
+	// perform inspection to retrieve the exitcode
+	inspectOut, err := containers.ExecInspect(ctx, execID, nil)
+	if err != nil {
+		return nil, err
 	}
 	log.Debugf("Exec attached to the container %q and got stdout %q and stderr %q", cID, sOut.Bytes(), sErr.Bytes())
-	return sOut.Bytes(), sErr.Bytes(), nil
+
+	// fill the execution result
+	execResult := exec.NewExecResult(execCmd)
+	execResult.SetStdErr(sErr.Bytes())
+	execResult.SetStdOut(sOut.Bytes())
+	execResult.SetReturnCode(inspectOut.ExitCode)
+
+	return execResult, nil
 }
 
-func (r *PodmanRuntime) ExecNotWait(ctx context.Context, cID string, cmd []string) error {
+func (r *PodmanRuntime) ExecNotWait(ctx context.Context, cID string, exec *exec.ExecCmd) error {
 	ctx, err := r.connect(ctx)
 	if err != nil {
 		return err
@@ -263,7 +319,7 @@ func (r *PodmanRuntime) ExecNotWait(ctx context.Context, cID string, cmd []strin
 			Tty:          false,
 			AttachStderr: false,
 			AttachStdout: false,
-			Cmd:          cmd,
+			Cmd:          exec.GetCmd(),
 		},
 	}
 	execID, err := containers.ExecCreate(ctx, cID, &execCreateConf)
@@ -273,7 +329,7 @@ func (r *PodmanRuntime) ExecNotWait(ctx context.Context, cID string, cmd []strin
 	}
 	execSAAOpts := new(containers.ExecStartAndAttachOptions)
 	err = containers.ExecStartAndAttach(ctx, execID, execSAAOpts)
-	return nil
+	return err
 }
 
 // DeleteContainer removes a given container from the system (if it exists).
@@ -304,7 +360,7 @@ func (r *PodmanRuntime) Config() runtime.RuntimeConfig {
 
 // GetName returns runtime name as a string.
 func (r *PodmanRuntime) GetName() string {
-	return runtimeName
+	return RuntimeName
 }
 
 // GetHostsPath returns fs path to a file which is mounted as /etc/hosts into a given container.
@@ -320,4 +376,33 @@ func (r *PodmanRuntime) GetHostsPath(ctx context.Context, cID string) (string, e
 	hostsPath := inspect.HostsPath
 	log.Debugf("Method GetHostsPath was called with a resulting path %q", hostsPath)
 	return hostsPath, nil
+}
+
+// GetContainerStatus retrieves the ContainerStatus of the named container.
+func (r *PodmanRuntime) GetContainerStatus(ctx context.Context, cID string) runtime.ContainerStatus {
+	ctx, err := r.connect(ctx)
+	if err != nil {
+		return runtime.NotFound
+	}
+	icd, err := containers.Inspect(ctx, cID, nil)
+	if err != nil {
+		return runtime.NotFound
+	}
+	if icd.State.Running {
+		return runtime.Running
+	}
+	return runtime.Stopped
+}
+
+// IsHealthy returns true is the container is reported as being healthy, false otherwise.
+func (r *PodmanRuntime) IsHealthy(ctx context.Context, cID string) (bool, error) {
+	ctx, err := r.connect(ctx)
+	if err != nil {
+		return false, err
+	}
+	icd, err := containers.Inspect(ctx, cID, nil)
+	if err != nil {
+		return false, err
+	}
+	return icd.State.Health.Status == "healthy", nil
 }

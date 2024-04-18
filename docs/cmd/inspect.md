@@ -11,15 +11,19 @@ The `inspect` command provides the information about the deployed labs.
 ### Flags
 
 #### all
-With the local `--all` flag its possible to list all deployed labs in a single table. The output will also show the relative path to the topology file that was used to spawn this lab.
+With the local `--all` flag it's possible to list all deployed labs in a single table. The output will also show the relative path to the topology file that was used to spawn this lab.
 
 The lab name and path values will be set for the first node of such lab, to reduce the clutter. Refer to the [examples](#examples) section for more details.
 
 #### topology | name
 
-With the global `--topo | -t` or `--name | -n` flag a user specifies which particular lab they want to get the information about.
+With the global `--topo | -t` flag a user sets the path to the topology definition file that will be used to spin up a lab.
 
-When the topology file flag is omitted, containerlab will try to find the matching file name by looking at the current working directory. If a single file is found, it will be used.
+When the topology path refers to a directory, containerlab will look for a file with `.clab.yml` extension in that directory and use it as a topology definition file.
+
+When the topology file flag is omitted, containerlab will try to find the matching file name by looking at the current working directory.
+
+If more than one file is found for directory-based path or when the flag is omitted entirely, containerlab will fail with an error.
 
 #### format
 
@@ -34,9 +38,10 @@ With this flag inspect command will output every bit of information about the ru
 
 ### Examples
 
+#### List all running labs on the host
+
 ```bash
-# list all running labs on the host
-containerlab inspect --all
+❯ containerlab inspect --all
 +---+------------+----------+-----------------+--------------+--------------------+------+-------+---------+----------------+----------------------+
 | # | Topo Path  | Lab Name |      Name       | Container ID |       Image        | Kind | Group |  State  |  IPv4 Address  |     IPv6 Address     |
 +---+------------+----------+-----------------+--------------+--------------------+------+-------+---------+----------------+----------------------+
@@ -45,19 +50,39 @@ containerlab inspect --all
 | 3 | srl02.yml  | srl01    | clab-srl01-srl  | 13c9e7543771 | srlinux:20.6.3-145 | srl  |       | running | 172.20.20.2/24 | 2001:172:20:20::2/80 |
 | 4 |            |          | clab-srl01-srl2 | 8cfca93b7b6f | srlinux:20.6.3-145 | srl  |       | running | 172.20.20.3/24 | 2001:172:20:20::3/80 |
 +---+------------+----------+-----------------+--------------+--------------------+------+-------+---------+----------------+----------------------+
+```
 
-# provide information about the running lab named srl02
-containerlab inspect --name srlceos01
+#### Provide information about a specific running lab by its name
+
+Provide information about the running lab named `srlceos01`
+
+```bash
+❯ containerlab inspect --name srlceos01
 +---+---------------------+--------------+---------+------+-------+---------+----------------+----------------------+
 | # |        Name         | Container ID |  Image  | Kind | Group |  State  |  IPv4 Address  |     IPv6 Address     |
 +---+---------------------+--------------+---------+------+-------+---------+----------------+----------------------+
 | 1 | clab-srlceos01-ceos | 90bebb1e2c5f | ceos    | ceos |       | running | 172.20.20.4/24 | 2001:172:20:20::4/80 |
 | 2 | clab-srlceos01-srl  | 82e9aa3c7e6b | srlinux | srl  |       | running | 172.20.20.3/24 | 2001:172:20:20::3/80 |
 +---+---------------------+--------------+---------+------+-------+---------+----------------+----------------------+
+```
 
+#### Provide information about a specific running lab by its topology file
 
-# now in json format
-containerlab inspect --name srlceos01 -f json
+```bash
+❯ clab inspect -t srl02.clab.yml 
+INFO[0000] Parsing & checking topology file: srl02.clab.yml 
++---+-----------------+--------------+-----------------------+------+---------+----------------+----------------------+
+| # |      Name       | Container ID |         Image         | Kind |  State  |  IPv4 Address  |     IPv6 Address     |
++---+-----------------+--------------+-----------------------+------+---------+----------------+----------------------+
+| 1 | clab-srl02-srl1 | 7a7c101be7d8 | ghcr.io/nokia/srlinux | srl  | running | 172.20.20.4/24 | 2001:172:20:20::4/64 |
+| 2 | clab-srl02-srl2 | 5e3737621753 | ghcr.io/nokia/srlinux | srl  | running | 172.20.20.5/24 | 2001:172:20:20::5/64 |
++---+-----------------+--------------+-----------------------+------+---------+----------------+----------------------+
+```
+
+#### Provide information about a specific running lab in json format
+
+```bash
+❯ containerlab inspect --name srlceos01 -f json
 [
   {
     "lab_name": "srlceos01",
@@ -81,3 +106,4 @@ containerlab inspect --name srlceos01 -f json
   }
 ]
 ```
+

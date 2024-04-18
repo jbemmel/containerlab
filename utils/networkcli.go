@@ -26,9 +26,9 @@ var (
 			"exec": "docker",
 			"open": "exec -it",
 		},
-		"containerd": {
-			"exec": "ctr",
-			"open": "-n clab task exec -t --exec-id clab",
+		"podman": {
+			"exec": "podman",
+			"open": "exec -it",
 		},
 	}
 )

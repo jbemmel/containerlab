@@ -7,4 +7,3 @@ This is also an example of how to pre-configure lab nodes on "linux" node types 
 To start this lab, run the *run.sh* script, which will run the containerlab deploy commands, and then configure the PC interfaces.
 
 The lab configuration is documented in detail at: https://www.brianlinkletter.com/2021/05/use-containerlab-to-emulate-open-source-routers/
-

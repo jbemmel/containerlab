@@ -5,22 +5,30 @@
 package clab
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
-	"github.com/containers/podman/v4/pkg/util"
 	"github.com/google/go-cmp/cmp"
+	"github.com/srl-labs/containerlab/labels"
+	"github.com/srl-labs/containerlab/links"
+	"github.com/srl-labs/containerlab/mocks/mockruntime"
+	"github.com/srl-labs/containerlab/runtime"
+	"github.com/srl-labs/containerlab/runtime/docker"
 	"github.com/srl-labs/containerlab/utils"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 )
 
 func setupTestCase(t *testing.T) func(t *testing.T) {
 	// setup function
 	// create node' labdir with a file that is used in topo2 definition for binds resolver to check path existence
 	f, _ := filepath.Abs("clab-topo2/node1/somefile")
-	os.MkdirAll("clab-topo2/node1", 0777)
+	os.MkdirAll("clab-topo2/node1", 0777) // skipcq: GSC-G301
 
 	if _, err := os.Create(f); err != nil {
 		t.Error(err)
@@ -60,16 +68,13 @@ func TestLicenseInit(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
-				WithTopoFile(tc.got, ""),
+				WithTopoPath(tc.got, ""),
 			}
 			c, err := NewContainerLab(opts...)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			// fmt.Println(c.Config.Topology.Defaults)
-			// fmt.Println(c.Config.Topology.Kinds)
-			// fmt.Println(c.Config.Topology.Nodes)
 			if filepath.Base(c.Nodes["node1"].Config().License) != tc.want {
 				t.Fatalf("wanted '%s' got '%s'", tc.want, c.Nodes["node1"].Config().License)
 			}
@@ -114,7 +119,7 @@ func TestBindsInit(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
-				WithTopoFile(tc.got, ""),
+				WithTopoPath(tc.got, ""),
 			}
 			c, err := NewContainerLab(opts...)
 			if err != nil {
@@ -133,7 +138,7 @@ func TestBindsInit(t *testing.T) {
 			}
 
 			for _, b := range tc.want {
-				if !util.StringInSlice(b, binds) {
+				if !slices.Contains(binds, b) {
 					t.Errorf("bind %q is not found in resulting binds %q", b, binds)
 				}
 			}
@@ -175,7 +180,7 @@ func TestTypeInit(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
-				WithTopoFile(tc.got, ""),
+				WithTopoPath(tc.got, ""),
 			}
 			c, err := NewContainerLab(opts...)
 			if err != nil {
@@ -256,7 +261,7 @@ func TestEnvInit(t *testing.T) {
 			}
 
 			opts := []ClabOption{
-				WithTopoFile(tc.got, ""),
+				WithTopoPath(tc.got, ""),
 			}
 			c, err := NewContainerLab(opts...)
 			if err != nil {
@@ -308,7 +313,7 @@ func TestUserInit(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
-				WithTopoFile(tc.got, ""),
+				WithTopoPath(tc.got, ""),
 			}
 			c, err := NewContainerLab(opts...)
 			if err != nil {
@@ -333,7 +338,7 @@ func TestVerifyLinks(t *testing.T) {
 	}{
 		"two_duplicated_links": {
 			got:  "test_data/topo6.yml",
-			want: "endpoints [\"lin1:eth1\" \"lin2:eth2\"] appeared more than once in the links section of the topology file",
+			want: "duplicate endpoint lin1:eth1\nduplicate endpoint lin1:eth1\nduplicate endpoint lin2:eth2\nduplicate endpoint lin2:eth2\nduplicate endpoint lin1:eth4\nduplicate endpoint lin1:eth4",
 		},
 		"no_duplicated_links": {
 			got:  "test_data/topo1.yml",
@@ -344,22 +349,33 @@ func TestVerifyLinks(t *testing.T) {
 	teardownTestCase := setupTestCase(t)
 	defer teardownTestCase(t)
 
+	ctx := context.Background()
+
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
-				WithTopoFile(tc.got, ""),
+				WithTopoPath(tc.got, ""),
+				WithRuntime(docker.RuntimeName,
+					&runtime.RuntimeConfig{
+						VerifyLinkParams: links.NewVerifyLinkParams(),
+					},
+				),
 			}
 			c, err := NewContainerLab(opts...)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			err = c.verifyLinks()
+			err = c.ResolveLinks()
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = c.verifyLinks(ctx)
 			if err != nil && err.Error() != tc.want {
 				t.Fatalf("wanted %q got %q", tc.want, err.Error())
 			}
 			if err == nil && tc.want != "" {
-				t.Fatalf("wanted %q got %q", tc.want, err.Error())
+				t.Fatalf("wanted %q got nil", tc.want)
 			}
 		})
 	}
@@ -375,55 +391,55 @@ func TestLabelsInit(t *testing.T) {
 			got:  "test_data/topo1.yml",
 			node: "node1",
 			want: map[string]string{
-				ContainerlabLabel: "topo1",
-				NodeNameLabel:     "node1",
-				NodeKindLabel:     "srl",
-				NodeTypeLabel:     "ixrd2",
-				NodeGroupLabel:    "",
-				NodeLabDirLabel:   "../clab-topo1/node1",
-				TopoFileLabel:     "topo1.yml",
+				labels.Containerlab: "topo1",
+				labels.NodeName:     "node1",
+				labels.NodeKind:     "nokia_srlinux",
+				labels.NodeType:     "ixrd2",
+				labels.NodeGroup:    "",
+				labels.NodeLabDir:   "../clab-topo1/node1",
+				labels.TopoFile:     "topo1.yml",
 			},
 		},
 		"custom_node_label": {
 			got:  "test_data/topo1.yml",
 			node: "node2",
 			want: map[string]string{
-				ContainerlabLabel: "topo1",
-				NodeNameLabel:     "node2",
-				NodeKindLabel:     "srl",
-				NodeTypeLabel:     "ixrd2",
-				NodeGroupLabel:    "",
-				NodeLabDirLabel:   "../clab-topo1/node2",
-				TopoFileLabel:     "topo1.yml",
-				"node-label":      "value",
+				labels.Containerlab: "topo1",
+				labels.NodeName:     "node2",
+				labels.NodeKind:     "nokia_srlinux",
+				labels.NodeType:     "ixrd2",
+				labels.NodeGroup:    "",
+				labels.NodeLabDir:   "../clab-topo1/node2",
+				labels.TopoFile:     "topo1.yml",
+				"node-label":        "value",
 			},
 		},
 		"custom_kind_label": {
 			got:  "test_data/topo2.yml",
 			node: "node1",
 			want: map[string]string{
-				ContainerlabLabel: "topo2",
-				NodeNameLabel:     "node1",
-				NodeKindLabel:     "srl",
-				NodeTypeLabel:     "ixrd2",
-				NodeGroupLabel:    "",
-				NodeLabDirLabel:   "../clab-topo2/node1",
-				TopoFileLabel:     "topo2.yml",
-				"kind-label":      "value",
+				labels.Containerlab: "topo2",
+				labels.NodeName:     "node1",
+				labels.NodeKind:     "nokia_srlinux",
+				labels.NodeType:     "ixrd2",
+				labels.NodeGroup:    "",
+				labels.NodeLabDir:   "../clab-topo2/node1",
+				labels.TopoFile:     "topo2.yml",
+				"kind-label":        "value",
 			},
 		},
 		"custom_default_label": {
 			got:  "test_data/topo3.yml",
 			node: "node2",
 			want: map[string]string{
-				ContainerlabLabel: "topo3",
-				NodeNameLabel:     "node2",
-				NodeKindLabel:     "srl",
-				NodeTypeLabel:     "ixrd2",
-				NodeGroupLabel:    "",
-				NodeLabDirLabel:   "../clab-topo3/node2",
-				TopoFileLabel:     "topo3.yml",
-				"default-label":   "value",
+				labels.Containerlab: "topo3",
+				labels.NodeName:     "node2",
+				labels.NodeKind:     "nokia_srlinux",
+				labels.NodeType:     "ixrd2",
+				labels.NodeGroup:    "",
+				labels.NodeLabDir:   "../clab-topo3/node2",
+				labels.TopoFile:     "topo3.yml",
+				"default-label":     "value",
 			},
 		},
 	}
@@ -434,15 +450,15 @@ func TestLabelsInit(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
-				WithTopoFile(tc.got, ""),
+				WithTopoPath(tc.got, ""),
 			}
 			c, err := NewContainerLab(opts...)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			tc.want[NodeLabDirLabel] = utils.ResolvePath(tc.want[NodeLabDirLabel], c.TopoFile.dir)
-			tc.want[TopoFileLabel] = utils.ResolvePath(tc.want[TopoFileLabel], c.TopoFile.dir)
+			tc.want[labels.NodeLabDir] = utils.ResolvePath(tc.want[labels.NodeLabDir], c.TopoPaths.TopologyFileDir())
+			tc.want[labels.TopoFile] = utils.ResolvePath(tc.want[labels.TopoFile], c.TopoPaths.TopologyFileDir())
 
 			labels := c.Nodes[tc.node].Config().Labels
 
@@ -465,20 +481,156 @@ func TestLabelsInit(t *testing.T) {
 	}
 }
 
-func TestVerifyRootNetnsInterfaceUniqueness(t *testing.T) {
-	opts := []ClabOption{
-		WithTopoFile("test_data/topo7-dup-rootnetns.yml", ""),
-	}
-	c, err := NewContainerLab(opts...)
-	if err != nil {
-		t.Fatal(err)
+func TestVerifyRootNetNSLinks(t *testing.T) {
+	tests := map[string]struct {
+		topo      string
+		wantError bool
+	}{
+		"dup rootnetns": {
+			topo:      "test_data/topo7-dup-rootnetns.yml",
+			wantError: true,
+		},
+		"topo1": {
+			topo:      "test_data/topo1.yml",
+			wantError: false,
+		},
+		"topo3": {
+			topo:      "test_data/topo3.yml",
+			wantError: false,
+		},
+		"topo4": {
+			topo:      "test_data/topo4.yml",
+			wantError: false,
+		},
 	}
 
-	err = c.verifyRootNetnsInterfaceUniqueness()
-	if err == nil {
-		t.Fatalf("expected duplicate rootns links error")
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			opts := []ClabOption{
+				WithTopoPath(tc.topo, ""),
+			}
+			c, err := NewContainerLab(opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = c.ResolveLinks()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = c.verifyRootNetNSLinks()
+			if tc.wantError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
-	t.Logf("error: %v", err)
+}
+
+func TestVerifyContainersUniqueness(t *testing.T) {
+	tests := map[string]struct {
+		mockResult struct {
+			c []runtime.GenericContainer
+			e error
+		}
+		topo      string
+		wantError bool
+	}{
+		"no dups": {
+			mockResult: struct {
+				c []runtime.GenericContainer
+				e error
+			}{
+				c: []runtime.GenericContainer{
+					{
+						Names:  []string{"some node"},
+						Labels: map[string]string{},
+					},
+					{
+						Names:  []string{"some other node"},
+						Labels: map[string]string{},
+					},
+				},
+				e: nil,
+			},
+			topo:      "test_data/topo1.yml",
+			wantError: false,
+		},
+		"dups": {
+			mockResult: struct {
+				c []runtime.GenericContainer
+				e error
+			}{
+				c: []runtime.GenericContainer{
+					{
+						Names:  []string{"clab-topo1-node1"},
+						Labels: map[string]string{},
+					},
+					{
+						Names:  []string{"somenode"},
+						Labels: map[string]string{},
+					},
+				},
+				e: nil,
+			},
+			wantError: true,
+			topo:      "test_data/topo1.yml",
+		},
+		"ext-container": {
+			mockResult: struct {
+				c []runtime.GenericContainer
+				e error
+			}{
+				c: []runtime.GenericContainer{
+					{
+						Names:  []string{"node1"},
+						Labels: map[string]string{},
+					},
+					{
+						Names:  []string{"somenode"},
+						Labels: map[string]string{},
+					},
+				},
+				e: nil,
+			},
+			wantError: false,
+			topo:      "test_data/topo11-ext-cont.yaml",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			// init Runtime Mock
+			ctrl := gomock.NewController(t)
+			rtName := "mock"
+
+			opts := []ClabOption{
+				WithTopoPath(tc.topo, ""),
+			}
+			c, err := NewContainerLab(opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// set mockRuntime parameters
+			mockRuntime := mockruntime.NewMockContainerRuntime(ctrl)
+			c.Runtimes[rtName] = mockRuntime
+			c.globalRuntimeName = rtName
+
+			// prepare runtime result
+			mockRuntime.EXPECT().ListContainers(gomock.Any(), gomock.Any()).AnyTimes().Return(tc.mockResult.c, tc.mockResult.e)
+
+			ctx := context.Background()
+			err = c.verifyContainersUniqueness(ctx)
+			if tc.wantError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestEnvFileInit(t *testing.T) {
@@ -513,7 +665,7 @@ func TestEnvFileInit(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
-				WithTopoFile(tc.got, ""),
+				WithTopoPath(tc.got, ""),
 			}
 			c, err := NewContainerLab(opts...)
 			if err != nil {
@@ -527,6 +679,50 @@ func TestEnvFileInit(t *testing.T) {
 				if val, exists := env[k]; !(exists && val == v) {
 					t.Fatalf("wanted %q to be contained in env, but got %q", tc.want, env)
 				}
+			}
+		})
+	}
+}
+
+func TestSuppressConfigInit(t *testing.T) {
+	tests := map[string]struct {
+		got  string
+		node string
+		want bool
+	}{
+		"suppress_true": {
+			got:  "test_data/topo12.yml",
+			node: "node1",
+			want: true,
+		},
+		"suppress_false": {
+			got:  "test_data/topo12.yml",
+			node: "node2",
+			want: false,
+		},
+		"suppress_undef": {
+			got:  "test_data/topo12.yml",
+			node: "node3",
+			want: false,
+		},
+		"topo_default": {
+			got:  "test_data/topo12.yml",
+			node: "node4",
+			want: true,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			opts := []ClabOption{
+				WithTopoPath(tc.got, ""),
+			}
+			c, err := NewContainerLab(opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			suppress := c.Nodes[tc.node].Config().SuppressStartupConfig
+			if suppress != tc.want {
+				t.Fatalf("wanted %v, got %v", tc.want, suppress)
 			}
 		})
 	}

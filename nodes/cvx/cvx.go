@@ -3,10 +3,12 @@ package cvx
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/nodes"
-	"github.com/srl-labs/containerlab/runtime"
+	"github.com/srl-labs/containerlab/nodes/state"
+	"github.com/srl-labs/containerlab/runtime/ignite"
 	"github.com/srl-labs/containerlab/types"
 	meta "github.com/weaveworks/ignite/pkg/apis/meta/v1alpha1"
 	"github.com/weaveworks/ignite/pkg/operations"
@@ -23,31 +25,34 @@ var memoryReqs = map[string]string{
 	"4.4.0": "768MB",
 }
 
-func init() {
-	nodes.Register(kindnames, func() nodes.Node {
+// Register registers the node in the NodeRegistry.
+func Register(r *nodes.NodeRegistry) {
+	r.Register(kindnames, func() nodes.Node {
 		return new(cvx)
-	})
-	nodes.SetNonDefaultRuntimePerKind(kindnames, runtime.IgniteRuntime)
+	}, nil)
+	nodes.SetNonDefaultRuntimePerKind(kindnames, ignite.RuntimeName)
 }
 
 type cvx struct {
-	cfg     *types.NodeConfig
+	nodes.DefaultNode
 	vmChans *operations.VMChannels
-	runtime runtime.ContainerRuntime
 }
 
 func (c *cvx) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
-	c.cfg = cfg
+	// Init DefaultNode
+	c.DefaultNode = *nodes.NewDefaultNode(c)
+
+	c.Cfg = cfg
 	for _, o := range opts {
 		o(c)
 	}
 
-	if c.cfg.Kernel == "" {
-		c.cfg.Kernel = defaultCvxKernelImageRef
+	if c.Cfg.Kernel == "" {
+		c.Cfg.Kernel = defaultCvxKernelImageRef
 	}
 
-	if c.cfg.Sandbox == "" {
-		c.cfg.Sandbox = defaultIgniteSandboxImage
+	if c.Cfg.Sandbox == "" {
+		c.Cfg.Sandbox = defaultIgniteSandboxImage
 	}
 
 	ociRef, err := meta.NewOCIImageRef(cfg.Image)
@@ -69,28 +74,27 @@ func (c *cvx) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
 	return nil
 }
 
-func (c *cvx) Config() *types.NodeConfig { return c.cfg }
-
-func (*cvx) PreDeploy(_, _, _ string) error { return nil }
-
-func (c *cvx) Deploy(ctx context.Context) error {
+func (c *cvx) Deploy(ctx context.Context, _ *nodes.DeployParams) error {
 	// CreateContainer is no-op in case of ignite runtime
-	cID, err := c.runtime.CreateContainer(ctx, c.cfg)
+	cID, err := c.Runtime.CreateContainer(ctx, c.Cfg)
 	if err != nil {
 		return err
 	}
-	intf, err := c.runtime.StartContainer(ctx, cID, c.cfg)
+	intf, err := c.Runtime.StartContainer(ctx, cID, c)
 	if err != nil {
 		return err
 	}
 	if vmChans, ok := intf.(*operations.VMChannels); ok {
 		c.vmChans = vmChans
 	}
+
+	c.SetState(state.Deployed)
+
 	return nil
 }
 
-func (c *cvx) PostDeploy(_ context.Context, _ map[string]nodes.Node) error {
-	log.Debugf("Running postdeploy actions for cvx '%s' node", c.cfg.ShortName)
+func (c *cvx) PostDeploy(_ context.Context, _ *nodes.PostDeployParams) error {
+	log.Debugf("Running postdeploy actions for cvx '%s' node", c.Cfg.ShortName)
 	if c.vmChans == nil {
 		return nil
 	}
@@ -98,29 +102,29 @@ func (c *cvx) PostDeploy(_ context.Context, _ map[string]nodes.Node) error {
 	return <-c.vmChans.SpawnFinished
 }
 
-func (c *cvx) GetImages() map[string]string {
+func (c *cvx) GetImages(_ context.Context) map[string]string {
 	images := make(map[string]string)
-	images[nodes.ImageKey] = c.cfg.Image
+	images[nodes.ImageKey] = c.Cfg.Image
 
-	if c.runtime.GetName() != runtime.IgniteRuntime {
+	if c.Runtime.GetName() != ignite.RuntimeName {
 		return images
 	}
 
-	images[nodes.KernelKey] = c.cfg.Kernel
-	images[nodes.SandboxKey] = c.cfg.Sandbox
+	images[nodes.KernelKey] = c.Cfg.Kernel
+	images[nodes.SandboxKey] = c.Cfg.Sandbox
 	return images
 }
 
-func (*cvx) WithMgmtNet(*types.MgmtNet)               {}
-func (c *cvx) WithRuntime(r runtime.ContainerRuntime) { c.runtime = r }
+// CheckInterfaceName checks if a name of the interface referenced in the topology file correct.
+func (c *cvx) CheckInterfaceName() error {
+	// allow swpX interface names
+	// https://regex101.com/r/SV0k1J/1
+	ifRe := regexp.MustCompile(`swp[\d\.]+$`)
+	for _, e := range c.Endpoints {
+		if !ifRe.MatchString(e.GetIfaceName()) {
+			return fmt.Errorf("%q interface name %q doesn't match the required pattern. It should be named as swpX, where X is >=0", c.Cfg.ShortName, e.GetIfaceName())
+		}
+	}
 
-func (c *cvx) Delete(ctx context.Context) error {
-	return c.runtime.DeleteContainer(ctx, c.Config().LongName)
-}
-
-func (s *cvx) GetRuntime() runtime.ContainerRuntime { return s.runtime }
-
-func (c *cvx) SaveConfig(_ context.Context) error {
-	log.Debugf("Save operation is currently not supported for %q node kind", c.cfg.Kind)
 	return nil
 }

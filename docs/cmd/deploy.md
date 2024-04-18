@@ -16,7 +16,54 @@ The `deploy` command spins up a lab using the topology expressed via [topology d
 
 With the global `--topo | -t` flag a user sets the path to the topology definition file that will be used to spin up a lab.
 
-When the topology file flag is omitted, containerlab will try to find the matching file name by looking at the current working directory. If a single file is found, it will be used.
+When the topology path refers to a directory, containerlab will look for a file with `.clab.yml` extension in that directory and use it as a topology definition file.
+
+When the topology file flag is omitted, containerlab will try to find the matching file name by looking at the current working directory.
+
+If more than one file is found for directory-based path or when the flag is omitted entirely, containerlab will fail with an error.
+
+It is possible to read the topology file from stdin by passing `-` as a value to the `--topo` flag. See [examples](#deploy-a-lab-from-a-remote-url-with-curl) for more details.
+
+##### Remote topology files
+
+###### Git
+
+To simplify the deployment of labs that are stored in remote version control systems, containerlab supports the use of remote topology files for GitHub.com and GitLab.com hosted projects.
+
+By specifying a URL to a repository or a `.clab.yml` file in a repository, containerlab will automatically clone[^1] the repository in your current directory and deploy it. If the URL points to a `.clab.yml` file, containerlab will clone the repository and deploy the lab defined in the file.
+
+The following URL formats are supported:
+
+| Type                                  | Example                                                             | Which topology file is used                                                        |
+| ------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Link to github repository             | https://github.com/hellt/clab-test-repo/                            | An auto-find procedure will find a `clab.yml` in the repository root and deploy it |
+| Link to a file in a github repository | https://github.com/hellt/clab-test-repo/blob/main/lab1.clab.yml     | A file specified in the URL will be deployed                                       |
+| Link to a repo's branch               | https://github.com/hellt/clab-test-repo/tree/branch1                | A branch of a repo is cloned and auto-find procedure kicks in                      |
+| Link to a file in a branch of a repo  | https://github.com/hellt/clab-test-repo/blob/branch1/lab2.clab.yml  | A branch is cloned and a file specified in the URL is used for deployment          |
+| Link to a file in a subdir of a repo  | https://github.com/hellt/clab-test-repo/blob/main/dir/lab3.clab.yml | A file specified in the subdir of the branch will be deployed                      |
+| Shortcut of a github project          | hellt/clab-test-repo                                                | An auto-find procedure will find a `clab.yml` in the repository root and deploy it |
+
+When the lab is deployed using the URL, the repository is cloned in the current working directory. If the repository is already cloned it will be used and not cloned again; containerlab will try to fetch the latest changes from the remote repository.
+
+Subsequent lab operations (such as destroy) must use the filesystem path to the topology file and not the URL.
+
+???note "Remote labs workflow in action"
+    <div class="iframe-container">
+        <iframe width="100%" src="https://www.youtube.com/embed/0QlUZsJGQDo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+    </div>
+
+###### HTTP(S)
+
+Labs can be deployed from remote HTTP(S) URLs as well. These labs should be self-contained and not reference any external resources, like startup-config files, licenses, binds, etc.
+
+The following URL formats are supported:
+
+| Type                           | Example                                                             | Description                                           |
+| ------------------------------ | ------------------------------------------------------------------- | ----------------------------------------------------- |
+| Link to raw github gist        | https://gist.githubusercontent.com/hellt/abc/raw/def/linux.clab.yml | A file is downloaded to a temp directory and launched |
+| Link to a short schemaless URL | srlinux.dev/clab-srl                                                | A file is downloaded to a temp directory and launched |
+
+Containerlab distinct HTTP URLs from GitHub/GitLab by checking if github.com or gitlab.com is present in the URL. If not, it will treat the URL as a plain HTTP(S) URL.
 
 #### name
 
@@ -45,13 +92,12 @@ With `--max-workers` flag, it is possible to limit the number of concurrent work
 
 #### runtime
 
-Containerlab nodes can be started by different runtimes, with `docker` being the default one. Besides that, containerlab has experimental support for `podman`, `containerd`, and `ignite` runtimes.
+Containerlab nodes can be started by different runtimes, with `docker` being the default one. Besides that, containerlab has experimental support for `podman`, and `ignite` runtimes.
 
 A global runtime can be selected with a global `--runtime | -r` flag that will select a runtime to use. The possible value are:
 
 * `docker` - default
-* `podman` - beta support
-* `containerd` - experimental support
+* `podman` - experimental support
 * `ignite`
 
 #### timeout
@@ -77,9 +123,21 @@ Following values are accepted, ordered from most verbose to least: `trace`, `deb
 
 It should be useful to enable more verbose logging when something doesn't work as expected, to better understand what's going on, and to provide more useful output logs when reporting containerlab issues, while making it more terse in production environments.
 
+#### node-filter
+
+The local `--node-filter` flag allows users to specify a subset of topology nodes targeted by `deploy` command. The value of this flag is a comma-separated list of node names as they appear in the topology.
+
+When a subset of nodes is specified, containerlab will only deploy those nodes and links belonging to all selected nodes and ignore the rest. This can be useful e.g. in CI/CD test case scenarios, where resource constraints may prohibit the deployment of a full topology.
+
+Read more about [node filtering](../manual/node-filtering.md) in the documentation.
+
+#### skip-post-deploy
+
+The `--skip-post-deploy` flag can be used to skip the post-deploy phase of the lab deployment. This is a global flag that affects all nodes in the lab.
+
 ### Environment variables
 
-#### CLAB_RUNTIME
+#### `CLAB_RUNTIME`
 
 Default value of "runtime" key for nodes, same as global `--runtime | -r` flag described above.
 Affects all containerlab commands in the same way, not just `deploy`.
@@ -88,7 +146,7 @@ Intended to be set in environments where non-default container runtime should be
 
 Example command-line usage: `CLAB_RUNTIME=podman containerlab deploy`
 
-#### CLAB_VERSION_CHECK
+#### `CLAB_VERSION_CHECK`
 
 Can be set to "disable" value to prevent deploy command making a network request to check new version to report if one is available.
 
@@ -96,12 +154,45 @@ Useful when running in an automated environments with restricted network access.
 
 Example command-line usage: `CLAB_VERSION_CHECK=disable containerlab deploy`
 
+#### `CLAB_LABDIR_BASE`
+
+To change the [lab directory](../manual/conf-artifacts.md#identifying-a-lab-directory) location, set `CLAB_LABDIR_BASE` environment variable accordingly. It denotes the base directory in which the lab directory will be created.
+
+The default behavior is to create the lab directory in the current working dir.
+
 ### Examples
 
-```bash
-# deploy a lab from mylab.clab.yml file located in the same dir
-containerlab deploy -t mylab.clab.yml
+#### Deploy a lab using the given topology file
 
-# deploy a lab from mylab.clab.yml file and regenerate all configuration artifacts
+```bash
+containerlab deploy -t mylab.clab.yml
+```
+
+#### Deploy a lab and regenerate all configuration artifacts
+
+```bash
 containerlab deploy -t mylab.clab.yml --reconfigure
 ```
+
+#### Deploy a lab without specifying topology file
+
+Given that a single topology file is present in the current directory.
+
+```bash
+containerlab deploy
+```
+
+#### Deploy a lab using short flag names
+
+```bash
+clab dep -t mylab.clab.yml
+```
+
+#### Deploy a lab from a remote URL with curl
+
+```bash
+curl -s https://gist.githubusercontent.com/hellt/9baa28d7e3cb8290ade1e1be38a8d12b/raw/03067e242d44c9bbe38afa81131e46bab1fa0c42/test.clab.yml | \
+    sudo containerlab deploy -t -
+```
+
+[^1]: The repository is cloned with `--depth 1` parameter.

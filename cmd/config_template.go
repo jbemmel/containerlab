@@ -23,7 +23,8 @@ var configTemplateCmd = &cobra.Command{
 
 		c, err := clab.NewContainerLab(
 			clab.WithTimeout(timeout),
-			clab.WithTopoFile(topo, varsFile),
+			clab.WithTopoPath(topo, varsFile),
+			clab.WithDebug(debug),
 		)
 		if err != nil {
 			return err
@@ -34,7 +35,7 @@ var configTemplateCmd = &cobra.Command{
 			return err
 		}
 
-		allConfig := config.PrepareVars(c.Nodes, c.Links)
+		allConfig := config.PrepareVars(c)
 		if templateVarOnly {
 			for _, n := range configFilter {
 				conf := allConfig[n]

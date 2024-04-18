@@ -16,17 +16,18 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// templates to execute.
+// TemplateNames is templates to execute.
 var TemplateNames []string
 
-// path to additional templates.
+// TemplatePaths is path to additional templates.
 var TemplatePaths []string
 
-// debug count.
+// DebugCount is a debug verbosity counter.
 var DebugCount int
 
 type NodeConfig struct {
-	TargetNode *types.NodeConfig
+	TargetNode  *types.NodeConfig
+	Credentials []string // Node's credentials
 	// All the variables used to render the template
 	Vars map[string]interface{}
 	// the Rendered templates
@@ -34,7 +35,7 @@ type NodeConfig struct {
 	Info []string
 }
 
-// Load templates from all paths for the specific role/kind.
+// LoadTemplates loads templates from all paths for the specific role/kind.
 func LoadTemplates(tmpl *template.Template, role string) error {
 	for _, p := range TemplatePaths {
 		fn := filepath.Join(p, fmt.Sprintf("*__%s.tmpl", role))
@@ -42,7 +43,7 @@ func LoadTemplates(tmpl *template.Template, role string) error {
 		if err != nil {
 			if strings.Contains(err.Error(), "pattern matches no file") {
 				log.Debug(err)
-				return nil
+				continue
 			}
 			return fmt.Errorf("could not load templates from %s: %w", fn, err)
 		}
@@ -107,7 +108,7 @@ func RenderAll(allnodes map[string]*NodeConfig) error {
 	return nil
 }
 
-// Implement stringer for NodeConfig.
+// String implements stringer interface for NodeConfig.
 func (c *NodeConfig) String() string {
 	s := fmt.Sprintf("%s: %v", c.TargetNode.ShortName, c.Info)
 	return s

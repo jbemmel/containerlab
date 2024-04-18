@@ -12,15 +12,15 @@ const (
 	cniBin = "/opt/cni/bin"
 )
 
-// produces a canonical image name.
-// returns the canonical image name including the tag
+// GetCanonicalImageName produces a canonical image name.
 // if the input name did not specify a tag, the implicit "latest" tag is returned.
 func GetCanonicalImageName(imageName string) string {
-	// might need canonical name e.g.
-	//    -> alpine == docker.io/library/alpine
-	//    -> foo/bar == docker.io/foo/bar
-	//    -> foo.bar/baz == foo.bar/bar
-	//    -> docker.elastic.co/elasticsearch/elasticsearch == docker.elastic.co/elasticsearch/elasticsearch
+	// name transformation rules
+	//    alpine == docker.io/library/alpine:latest
+	//    foo/bar == docker.io/foo/bar:latest
+	//    foo.bar/baz == foo.bar/bar:latest
+	//    localhost/foo:bar == localhost/foo:bar
+	//    docker.elastic.co/elasticsearch/elasticsearch == docker.elastic.co/elasticsearch/elasticsearch:latest
 	canonicalImageName := imageName
 	slashCount := strings.Count(imageName, "/")
 
@@ -32,6 +32,9 @@ func GetCanonicalImageName(imageName string) string {
 		nameSplit := strings.Split(imageName, "/")
 		// case of foo.bar/baz
 		if strings.Contains(nameSplit[0], ".") {
+			canonicalImageName = imageName
+		} else if strings.Contains(nameSplit[0], "localhost") {
+			// case of localhost/foo:bar - podman prefixes local images with "localhost"
 			canonicalImageName = imageName
 		} else {
 			canonicalImageName = "docker.io/" + imageName

@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/srl-labs/containerlab/clab"
+	"github.com/srl-labs/containerlab/links"
 	"github.com/srl-labs/containerlab/types"
 	"gopkg.in/yaml.v2"
 )
@@ -28,11 +29,19 @@ var interfaceFormat = map[string]string{
 	"bridge":   "veth%d",
 	"vr-sros":  "eth%d",
 	"vr-vmx":   "eth%d",
+	"vr-vsrx":  "eth%d",
 	"vr-vqfx":  "eth%d",
 	"vr-xrv9k": "eth%d",
 	"vr-veos":  "eth%d",
+	"xrd":      "eth%d",
+	"rare":     "eth%d",
 }
-var supportedKinds = []string{"srl", "ceos", "linux", "bridge", "sonic-vs", "crpd", "vr-sros", "vr-vmx", "vr-vqfx", "vr-xrv9k"}
+
+var supportedKinds = []string{
+	"srl", "ceos", "linux", "bridge", "sonic-vs", "crpd", "vr-sros", "vr-vmx", "vr-vsrx",
+	"vr-vqfx", "vr-vjunosswitch", "vr-xrv9k", "vr-veos", "xrd", "rare", "openbsd", "cisco_ftdv",
+	"freebsd",
+}
 
 const (
 	defaultSRLType     = "ixrd2"
@@ -207,12 +216,24 @@ func generateTopologyConfig(name, network, ipv4range, ipv6range string,
 						Type:  nodes[i+1].typ,
 					}
 				}
-				config.Topology.Links = append(config.Topology.Links, &types.LinkConfig{
-					Endpoints: []string{
-						node1 + ":" + fmt.Sprintf(interfaceFormat[nodes[i].kind], k+1+interfaceOffset),
-						node2 + ":" + fmt.Sprintf(interfaceFormat[nodes[i+1].kind], j+1),
+
+				// create a raw veth link
+				l := &links.LinkVEthRaw{
+					Endpoints: []*links.EndpointRaw{
+						links.NewEndpointRaw(node1, fmt.Sprintf(
+							interfaceFormat[nodes[i].kind], k+1+interfaceOffset), ""),
+						links.NewEndpointRaw(node2, fmt.Sprintf(
+							interfaceFormat[nodes[i+1].kind], j+1), ""),
 					},
-				})
+				}
+
+				// encapsulate the brief rawlink in a linkdefinition
+				ld := &links.LinkDefinition{
+					Link: l.ToLinkBriefRaw(),
+				}
+
+				// add the link to the topology
+				config.Topology.Links = append(config.Topology.Links, ld)
 			}
 		}
 	}
@@ -308,7 +329,11 @@ func saveTopoFile(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+
 	_, err = f.Write(data)
-	return err
+	if err != nil {
+		return err
+	}
+
+	return f.Close()
 }

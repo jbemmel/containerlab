@@ -5,13 +5,16 @@
 package cmd
 
 import (
+	_ "embed"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	gover "github.com/hashicorp/go-version"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -28,45 +31,53 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 }
 
-var slug = `
-                           _                   _       _     
-                 _        (_)                 | |     | |    
- ____ ___  ____ | |_  ____ _ ____   ____  ____| | ____| | _  
-/ ___) _ \|  _ \|  _)/ _  | |  _ \ / _  )/ ___) |/ _  | || \ 
-( (__| |_|| | | | |_( ( | | | | | ( (/ /| |   | ( ( | | |_) )
-\____)___/|_| |_|\___)_||_|_|_| |_|\____)_|   |_|\_||_|____/ 
-`
+// this a note to self how color codes work
+// https://stackoverflow.com/questions/4842424/list-of-ansi-color-escape-sequences
+// https://patorjk.com/software/taag/#p=display&f=Ivrit&t=CONTAINERlab
+//
+//go:embed logo.txt
+var projASCIILogo string
 
 // versionCmd represents the version command.
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "show containerlab version or upgrade",
 
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(slug)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println(projASCIILogo)
+
 		verSlug := docsLinkFromVer(version)
 		fmt.Printf("    version: %s\n", version)
 		fmt.Printf("     commit: %s\n", commit)
 		fmt.Printf("       date: %s\n", date)
 		fmt.Printf("     source: %s\n", repoUrl)
 		fmt.Printf(" rel. notes: https://containerlab.dev/rn/%s\n", verSlug)
+
+		return nil
 	},
 }
 
 // get LatestVersion fetches latest containerlab release version from Github releases.
-func getLatestVersion(vc chan string) { // skipcq: RVV-A0006
+func getLatestVersion(ctx context.Context, vc chan string) { // skipcq: RVV-A0006
 	// client that doesn't follow redirects
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
-	resp, err := client.Head(fmt.Sprintf("%s/releases/latest", repoUrl))
+
+	req, err := http.NewRequestWithContext(ctx, "HEAD",
+		fmt.Sprintf("%s/releases/latest", repoUrl), nil)
+	if err != nil {
+		log.Debugf("error occurred during latest version fetch: %v", err)
+		return
+	}
+
+	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != 302 {
 		log.Debugf("error occurred during latest version fetch: %v", err)
 		return
 	}
-	defer resp.Body.Close()
 
 	loc := resp.Header.Get("Location")
 	split := strings.Split(loc, "releases/tag/")
@@ -80,6 +91,8 @@ func getLatestVersion(vc chan string) { // skipcq: RVV-A0006
 		log.Debugf("latest version %s is newer than the current one %s\n", vL.String(), vC.String())
 		vc <- vL.String()
 	}
+
+	resp.Body.Close()
 }
 
 // newVerNotification prints logs information about a new version if one was found.
@@ -110,4 +123,23 @@ func docsLinkFromVer(ver string) string {
 		relSlug = relSlug + fmt.Sprintf("#%d%d%d", maj, min, patch)
 	}
 	return relSlug
+}
+
+// getLatestClabVersion returns a chan that returns the version check result
+// uses the CLAB_VERSION_CHECK env variable (default true, if == "disable" will not perform the check).
+func getLatestClabVersion(ctx context.Context) chan string {
+	// latest version channel
+	vCh := make(chan string)
+
+	// check if new_version_notification is meant to be disabled
+	versionCheckStatus := os.Getenv("CLAB_VERSION_CHECK")
+	log.Debugf("Env: CLAB_VERSION_CHECK=%s", versionCheckStatus)
+
+	if strings.Contains(strings.ToLower(versionCheckStatus), "disable") {
+		close(vCh)
+	} else {
+		go getLatestVersion(ctx, vCh)
+	}
+
+	return vCh
 }

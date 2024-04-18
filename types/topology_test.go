@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/srl-labs/containerlab/utils"
+	"golang.org/x/exp/slices"
 )
 
 var topologyTestSet = map[string]struct {
@@ -14,17 +16,35 @@ var topologyTestSet = map[string]struct {
 		input: &Topology{
 			Nodes: map[string]*NodeDefinition{
 				"node1": {
-					Kind:   "srl",
-					CPU:    1,
-					Memory: "1G",
+					Kind:       "srl",
+					CPU:        1,
+					Memory:     "1G",
+					AutoRemove: utils.Pointer(true),
+					DNS: &DNSConfig{
+						Servers: []string{"1.1.1.1"},
+						Search:  []string{"foo.com"},
+						Options: []string{"someopt"},
+					},
+					Certificate: &CertificateConfig{
+						Issue: utils.Pointer(true),
+					},
 				},
 			},
 		},
 		want: map[string]*NodeDefinition{
 			"node1": {
-				Kind:   "srl",
-				CPU:    1,
-				Memory: "1G",
+				Kind:       "srl",
+				CPU:        1,
+				Memory:     "1G",
+				AutoRemove: utils.Pointer(true),
+				DNS: &DNSConfig{
+					Servers: []string{"1.1.1.1"},
+					Search:  []string{"foo.com"},
+					Options: []string{"someopt"},
+				},
+				Certificate: &CertificateConfig{
+					Issue: utils.Pointer(true),
+				},
 			},
 		},
 	},
@@ -59,8 +79,17 @@ var topologyTestSet = map[string]struct {
 						"label1": "v1",
 						"label2": "v2",
 					},
-					CPU:    1,
-					Memory: "1G",
+					CPU:        1,
+					Memory:     "1G",
+					AutoRemove: utils.Pointer(true),
+					DNS: &DNSConfig{
+						Servers: []string{"8.8.8.8"},
+						Search:  []string{"bar.com"},
+						Options: []string{"someotheropt"},
+					},
+					Certificate: &CertificateConfig{
+						Issue: utils.Pointer(true),
+					},
 				},
 			},
 			Nodes: map[string]*NodeDefinition{
@@ -72,7 +101,13 @@ var topologyTestSet = map[string]struct {
 					Labels: map[string]string{
 						"label2": "notv2",
 					},
-					Memory: "2G",
+					Memory:     "2G",
+					AutoRemove: utils.Pointer(false),
+					DNS: &DNSConfig{
+						Servers: []string{"1.1.1.1"},
+						Search:  []string{"foo.com"},
+						Options: []string{"someopt"},
+					},
 				},
 			},
 		},
@@ -106,18 +141,30 @@ var topologyTestSet = map[string]struct {
 					"label1": "v1",
 					"label2": "notv2",
 				},
-				CPU:    1,
-				Memory: "2G",
+				CPU:        1,
+				Memory:     "2G",
+				AutoRemove: utils.Pointer(false),
+				DNS: &DNSConfig{
+					Servers: []string{"1.1.1.1"},
+					Search:  []string{"foo.com"},
+					Options: []string{"someopt"},
+				},
+				Certificate: &CertificateConfig{
+					Issue: utils.Pointer(true),
+				},
 			},
 		},
 	},
 	"node_kind_default": {
 		input: &Topology{
 			Defaults: &NodeDefinition{
-				Kind:  "srl",
-				User:  "user1",
-				CPU:   1,
-				Binds: []string{"x:z"},
+				Kind: "srl",
+				User: "user1",
+				CPU:  1,
+				Binds: []string{
+					"x:z",
+					"m:n", // overriden by node
+				},
 			},
 			Kinds: map[string]*NodeDefinition{
 				"srl": {
@@ -149,11 +196,19 @@ var topologyTestSet = map[string]struct {
 					},
 					CPU:    2,
 					Memory: "2G",
+					DNS: &DNSConfig{
+						Servers: []string{"1.1.1.1"},
+						Search:  []string{"foo.com"},
+						Options: []string{"someopt"},
+					},
 				},
 			},
 			Nodes: map[string]*NodeDefinition{
 				"node1": {
-					Binds: []string{"e:f"},
+					Binds: []string{
+						"e:f",
+						"newm:n",
+					},
 				},
 			},
 		},
@@ -177,6 +232,7 @@ var topologyTestSet = map[string]struct {
 					"a:b",
 					"c:d",
 					"x:z",
+					"newm:n",
 				},
 				Ports: []string{
 					"80:8080",
@@ -191,6 +247,14 @@ var topologyTestSet = map[string]struct {
 				},
 				CPU:    1,
 				Memory: "2G",
+				DNS: &DNSConfig{
+					Servers: []string{"1.1.1.1"},
+					Search:  []string{"foo.com"},
+					Options: []string{"someopt"},
+				},
+				Certificate: &CertificateConfig{
+					Issue: utils.Pointer(false),
+				},
 			},
 		},
 	},
@@ -226,6 +290,11 @@ var topologyTestSet = map[string]struct {
 				},
 				CPU:    1,
 				Memory: "1G",
+				DNS: &DNSConfig{
+					Servers: []string{"1.1.1.1"},
+					Search:  []string{"foo.com"},
+					Options: []string{"someopt"},
+				},
 			},
 			Nodes: map[string]*NodeDefinition{
 				"node1": {},
@@ -260,8 +329,17 @@ var topologyTestSet = map[string]struct {
 					"label1": "v1",
 					"label2": "v2",
 				},
-				CPU:    1,
-				Memory: "1G",
+				CPU:        1,
+				Memory:     "1G",
+				AutoRemove: utils.Pointer(false),
+				DNS: &DNSConfig{
+					Servers: []string{"1.1.1.1"},
+					Search:  []string{"foo.com"},
+					Options: []string{"someopt"},
+				},
+				Certificate: &CertificateConfig{
+					Issue: utils.Pointer(false),
+				},
 			},
 		},
 	},
@@ -311,14 +389,8 @@ func TestGetNodeType(t *testing.T) {
 func TestGetNodeConfig(t *testing.T) {
 	for name, item := range topologyTestSet {
 		t.Logf("%q test item", name)
-		config, err := item.input.GetNodeStartupConfig("node1")
-		if err != nil {
-			t.Fatal(err)
-		}
+		config := item.input.GetNodeStartupConfig("node1")
 		wantedConfig := item.want["node1"].StartupConfig
-		if err != nil {
-			t.Fatal(err)
-		}
 		t.Logf("%q test item result: %v", name, config)
 		if !cmp.Equal(wantedConfig, config) {
 			t.Errorf("item %q failed", name)
@@ -346,14 +418,8 @@ func TestGetNodeImage(t *testing.T) {
 func TestGetNodeLicense(t *testing.T) {
 	for name, item := range topologyTestSet {
 		t.Logf("%q test item", name)
-		lic, err := item.input.GetNodeLicense("node1")
-		if err != nil {
-			t.Fatal(err)
-		}
+		lic := item.input.GetNodeLicense("node1")
 		wantedLicense := item.want["node1"].License
-		if err != nil {
-			t.Fatal(err)
-		}
 		t.Logf("%q test item result: %v", name, lic)
 		if !cmp.Equal(wantedLicense, lic) {
 			t.Errorf("item %q failed", name)
@@ -421,15 +487,15 @@ func TestGetNodeUser(t *testing.T) {
 }
 
 func TestGetNodeBinds(t *testing.T) {
-	for name, item := range topologyTestSet {
-		t.Logf("%q test item", name)
-		binds := item.input.GetNodeBinds("node1")
-		t.Logf("%q test item result: %v", name, binds)
-		if !cmp.Equal(item.want["node1"].Binds, binds) {
-			t.Errorf("item %q failed", name)
-			t.Errorf("item %q exp %q", name, item.want["node1"].Binds)
-			t.Errorf("item %q got %q", name, binds)
-			t.Fail()
+	for _, item := range topologyTestSet {
+		binds, _ := item.input.GetNodeBinds("node1")
+
+		// sort the slices so we can compare them
+		slices.Sort(binds)
+		slices.Sort(item.want["node1"].Binds)
+
+		if d := cmp.Diff(binds, item.want["node1"].Binds); d != "" {
+			t.Fatalf("Binds resolve failed.\nGot: %q\nWant: %q\nDiff\n%s", binds, item.want["node1"].Binds, d)
 		}
 	}
 }
@@ -458,6 +524,49 @@ func TestGetNodeLabels(t *testing.T) {
 			t.Errorf("item %q exp %q", name, item.want["node1"].Labels)
 			t.Errorf("item %q got %q", name, labels)
 			t.Fail()
+		}
+	}
+}
+
+func TestGetNodeAutoRemove(t *testing.T) {
+	for name, item := range topologyTestSet {
+		t.Logf("%q test item", name)
+		autoremove := item.input.GetNodeAutoRemove("node1")
+		t.Logf("%q test item result: %v", name, autoremove)
+		if item.want["node1"].AutoRemove != nil && *item.want["node1"].AutoRemove != autoremove {
+			t.Errorf("item %q failed", name)
+			t.Errorf("item %q exp %v", name, item.want["node1"].AutoRemove)
+			t.Errorf("item %q got %v", name, autoremove)
+			t.Fail()
+		}
+	}
+}
+
+func TestGetNodeDNS(t *testing.T) {
+	for name, item := range topologyTestSet {
+		t.Logf("%q test item", name)
+
+		dns := item.input.GetNodeDns("node1")
+
+		t.Logf("%q test item result: %v", name, dns)
+
+		if d := cmp.Diff(item.want["node1"].DNS, dns); d != "" {
+			t.Fatalf("DNS config object doesn't match.\nGot: %+v\nWant: %+v\nDiff\n%s", dns, item.want["node1"].DNS, d)
+		}
+	}
+}
+
+func TestGetNodeCertificateConfig(t *testing.T) {
+	for name, item := range topologyTestSet {
+		t.Logf("%q test item", name)
+
+		cert := item.input.GetCertificateConfig("node1")
+
+		t.Logf("%q test item result: %v", name, cert)
+
+		if d := cmp.Diff(item.want["node1"].Certificate, cert); d != "" {
+			t.Fatalf("Certificate config objects don't match.\nGot: %+v\nWant: %+v\nDiff\n%s",
+				cert, item.want["node1"].Certificate, d)
 		}
 	}
 }

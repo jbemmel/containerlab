@@ -11,6 +11,7 @@ rpm/*
 dist
 private
 clab-*
+.envrc
 
 tmp/
 # Test binary, built with `go test -c`
@@ -18,6 +19,7 @@ tmp/
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+tests/coverage
 
 # clab directories
 lab-examples/**/clab-*
@@ -34,5 +36,8 @@ site/
 .DS_Store
 __rd*
 tests/out
-**/.*clab.y?ml
-clab/test_data/*.bak
+# ignore backup clab topo files
+**/.*clab.y*ml.bak
+**/*.y*ml.bak
+
+.python-version

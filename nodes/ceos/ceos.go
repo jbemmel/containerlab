@@ -14,11 +14,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/srl-labs/containerlab/clab/exec"
 	"github.com/srl-labs/containerlab/nodes"
-	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
 	"github.com/srl-labs/containerlab/utils"
 )
@@ -44,18 +45,20 @@ var (
 	//go:embed ceos.cfg
 	cfgTemplate string
 
-	saveCmd = []string{"Cli", "-p", "15", "-c", "wr"}
+	saveCmd = "Cli -p 15 -c wr"
+
+	defaultCredentials = nodes.NewCredentials("admin", "admin")
 )
 
-func init() {
-	nodes.Register(kindnames, func() nodes.Node {
+// Register registers the node in the NodeRegistry.
+func Register(r *nodes.NodeRegistry) {
+	r.Register(kindnames, func() nodes.Node {
 		return new(ceos)
-	})
+	}, defaultCredentials)
 }
 
 type ceos struct {
-	cfg     *types.NodeConfig
-	runtime runtime.ContainerRuntime
+	nodes.DefaultNode
 }
 
 // intfMap represents interface mapping config file.
@@ -69,84 +72,82 @@ type intfMap struct {
 }
 
 func (n *ceos) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
-	n.cfg = cfg
+	// Init DefaultNode
+	n.DefaultNode = *nodes.NewDefaultNode(n)
+
+	n.Cfg = cfg
 	for _, o := range opts {
 		o(n)
 	}
 
-	n.cfg.Env = utils.MergeStringMaps(ceosEnv, n.cfg.Env)
+	n.Cfg.Env = utils.MergeStringMaps(ceosEnv, n.Cfg.Env)
 
 	// the node.Cmd should be aligned with the environment.
 	// prepending original Cmd with if-wait.sh script to make sure that interfaces are available
 	// before init process starts
 	var envSb strings.Builder
 	envSb.WriteString("bash -c '" + ifWaitScriptContainerPath + " ; exec /sbin/init ")
-	for k, v := range n.cfg.Env {
+	for k, v := range n.Cfg.Env {
 		envSb.WriteString("systemd.setenv=" + k + "=" + v + " ")
 	}
 	envSb.WriteString("'")
-	n.cfg.Cmd = envSb.String()
-	n.cfg.MacAddress = utils.GenMac("00:1c:73")
 
-	// mount config dir
-	cfgPath := filepath.Join(n.cfg.LabDir, "flash")
-	n.cfg.Binds = append(n.cfg.Binds, fmt.Sprintf("%s:/mnt/flash/", cfgPath))
-	return nil
-}
-
-func (n *ceos) Config() *types.NodeConfig { return n.cfg }
-
-func (n *ceos) PreDeploy(_, _, _ string) error {
-	utils.CreateDirectory(n.cfg.LabDir, 0777)
-	return n.createCEOSFiles()
-}
-
-func (n *ceos) Deploy(ctx context.Context) error {
-	cID, err := n.runtime.CreateContainer(ctx, n.cfg)
+	n.Cfg.Cmd = envSb.String()
+	hwa, err := utils.GenMac("00:1c:73")
 	if err != nil {
 		return err
 	}
-	_, err = n.runtime.StartContainer(ctx, cID, n.cfg)
-	return err
+	n.Cfg.MacAddress = hwa.String()
+
+	// mount config dir
+	cfgPath := filepath.Join(n.Cfg.LabDir, "flash")
+	n.Cfg.Binds = append(n.Cfg.Binds, fmt.Sprintf("%s:/mnt/flash/", cfgPath))
+	return nil
 }
 
-func (n *ceos) PostDeploy(_ context.Context, _ map[string]nodes.Node) error {
-	log.Infof("Running postdeploy actions for Arista cEOS '%s' node", n.cfg.ShortName)
-	return n.ceosPostDeploy()
+func (n *ceos) PreDeploy(ctx context.Context, params *nodes.PreDeployParams) error {
+	utils.CreateDirectory(n.Cfg.LabDir, 0777)
+	_, err := n.LoadOrGenerateCertificate(params.Cert, params.TopologyName)
+	if err != nil {
+		return nil
+	}
+	return n.createCEOSFiles(ctx)
 }
 
-func (*ceos) WithMgmtNet(*types.MgmtNet)               {}
-func (n *ceos) WithRuntime(r runtime.ContainerRuntime) { n.runtime = r }
-func (n *ceos) GetRuntime() runtime.ContainerRuntime   { return n.runtime }
+func (n *ceos) PostDeploy(ctx context.Context, _ *nodes.PostDeployParams) error {
+	log.Infof("Running postdeploy actions for Arista cEOS '%s' node", n.Cfg.ShortName)
+	return n.ceosPostDeploy(ctx)
+}
 
 func (n *ceos) SaveConfig(ctx context.Context) error {
-	_, stderr, err := n.runtime.Exec(ctx, n.cfg.LongName, saveCmd)
+	cmd, _ := exec.NewExecCmdFromString(saveCmd)
+	execResult, err := n.RunExec(ctx, cmd)
 	if err != nil {
-		return fmt.Errorf("%s: failed to execute cmd: %v", n.cfg.ShortName, err)
+		return fmt.Errorf("%s: failed to execute cmd: %v", n.Cfg.ShortName, err)
 	}
 
-	if len(stderr) > 0 {
-		return fmt.Errorf("%s errors: %s", n.cfg.ShortName, string(stderr))
+	if len(execResult.GetStdErrString()) > 0 {
+		return fmt.Errorf("%s errors: %s", n.Cfg.ShortName, execResult.GetStdErrString())
 	}
 
-	confPath := n.cfg.LabDir + "/flash/startup-config"
-	log.Infof("saved cEOS configuration from %s node to %s\n", n.cfg.ShortName, confPath)
+	confPath := n.Cfg.LabDir + "/flash/startup-config"
+	log.Infof("saved cEOS configuration from %s node to %s\n", n.Cfg.ShortName, confPath)
 
 	return nil
 }
 
-func (n *ceos) createCEOSFiles() error {
+func (n *ceos) createCEOSFiles(_ context.Context) error {
 	nodeCfg := n.Config()
 	// generate config directory
-	utils.CreateDirectory(path.Join(n.cfg.LabDir, "flash"), 0777)
-	cfg := filepath.Join(n.cfg.LabDir, "flash", "startup-config")
+	utils.CreateDirectory(path.Join(n.Cfg.LabDir, "flash"), 0777)
+	cfg := filepath.Join(n.Cfg.LabDir, "flash", "startup-config")
 	nodeCfg.ResStartupConfig = cfg
 
 	// set mgmt ipv4 gateway as it is already known by now
 	// since the container network has been created before we launch nodes
-	// and mgmt gateway can be used in ceos.cfg template to configure default route for mgmt
-	nodeCfg.MgmtIPv4Gateway = n.runtime.Mgmt().IPv4Gw
-	nodeCfg.MgmtIPv6Gateway = n.runtime.Mgmt().IPv6Gw
+	// and mgmt gateway can be used in ceos.Cfg template to configure default route for mgmt
+	nodeCfg.MgmtIPv4Gateway = n.Runtime.Mgmt().IPv4Gw
+	nodeCfg.MgmtIPv6Gateway = n.Runtime.Mgmt().IPv6Gw
 
 	// set the mgmt interface name for the node
 	err := setMgmtInterface(nodeCfg)
@@ -163,7 +164,7 @@ func (n *ceos) createCEOSFiles() error {
 		cfgTemplate = string(c)
 	}
 
-	err = nodeCfg.GenerateConfig(nodeCfg.ResStartupConfig, cfgTemplate)
+	err = n.GenerateConfig(nodeCfg.ResStartupConfig, cfgTemplate)
 	if err != nil {
 		return err
 	}
@@ -242,9 +243,9 @@ func setMgmtInterface(node *types.NodeConfig) error {
 }
 
 // ceosPostDeploy runs postdeploy actions which are required for ceos nodes.
-func (n *ceos) ceosPostDeploy() error {
+func (n *ceos) ceosPostDeploy(_ context.Context) error {
 	nodeCfg := n.Config()
-	d, err := utils.SpawnCLIviaExec("arista_eos", nodeCfg.LongName, n.runtime.GetName())
+	d, err := utils.SpawnCLIviaExec("arista_eos", nodeCfg.LongName, n.Runtime.GetName())
 	if err != nil {
 		return err
 	}
@@ -283,12 +284,16 @@ func (n *ceos) ceosPostDeploy() error {
 	return err
 }
 
-func (n *ceos) GetImages() map[string]string {
-	return map[string]string{
-		nodes.ImageKey: n.cfg.Image,
+// CheckInterfaceName checks if a name of the interface referenced in the topology file correct.
+func (n *ceos) CheckInterfaceName() error {
+	// allow eth and et interfaces
+	// https://regex101.com/r/umQW5Z/2
+	ifRe := regexp.MustCompile(`eth[1-9][\w\.]*$|et[1-9][\w\.]*$`)
+	for _, e := range n.Endpoints {
+		if !ifRe.MatchString(e.GetIfaceName()) {
+			return fmt.Errorf("arista cEOS node %q has an interface named %q which doesn't match the required pattern. Interfaces should be named as ethX or etX, where X consists of alpanumerical characters", n.Cfg.ShortName, e.GetIfaceName())
+		}
 	}
-}
 
-func (n *ceos) Delete(ctx context.Context) error {
-	return n.runtime.DeleteContainer(ctx, n.cfg.LongName)
+	return nil
 }

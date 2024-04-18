@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/srl-labs/containerlab/clab"
+	"github.com/srl-labs/containerlab/labels"
 	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
 )
@@ -24,11 +25,15 @@ const (
 )
 
 var (
-	srv       string
-	tmpl      string
-	offline   bool
-	dot       bool
-	staticDir string
+	srv              string
+	tmpl             string
+	offline          bool
+	dot              bool
+	mermaid          bool
+	mermaidDirection string
+	drawio           bool
+	drawioVersion    string
+	staticDir        string
 )
 
 // graphCmd represents the graph command.
@@ -44,7 +49,8 @@ func graphFn(_ *cobra.Command, _ []string) error {
 
 	opts := []clab.ClabOption{
 		clab.WithTimeout(timeout),
-		clab.WithTopoFile(topo, varsFile),
+		clab.WithTopoPath(topo, varsFile),
+		clab.WithNodeFilter(nodeFilter),
 		clab.WithRuntime(rt,
 			&runtime.RuntimeConfig{
 				Debug:            debug,
@@ -52,14 +58,28 @@ func graphFn(_ *cobra.Command, _ []string) error {
 				GracefulShutdown: graceful,
 			},
 		),
+		clab.WithDebug(debug),
 	}
 	c, err := clab.NewContainerLab(opts...)
 	if err != nil {
 		return err
 	}
 
+	err = c.ResolveLinks()
+	if err != nil {
+		return err
+	}
+
 	if dot {
-		return c.GenerateGraph(topo)
+		return c.GenerateDotGraph()
+	}
+
+	if mermaid {
+		return c.GenerateMermaidGraph(mermaidDirection)
+	}
+
+	if drawio {
+		return c.GenerateDrawioDiagram(drawioVersion)
 	}
 
 	gtopo := clab.GraphTopo{
@@ -70,10 +90,13 @@ func graphFn(_ *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var containers []types.GenericContainer
+	var containers []runtime.GenericContainer
 	// if offline mode is not enforced, list containers matching lab name
 	if !offline {
-		labels := []*types.GenericFilter{{FilterType: "label", Match: c.Config.Name, Field: "containerlab", Operator: "="}}
+		labels := []*types.GenericFilter{{
+			FilterType: "label", Match: c.Config.Name,
+			Field: labels.Containerlab, Operator: "=",
+		}}
 		containers, err = c.ListContainers(ctx, labels)
 		if err != nil {
 			return err
@@ -93,11 +116,14 @@ func graphFn(_ *cobra.Command, _ []string) error {
 		return gtopo.Nodes[i].Name < gtopo.Nodes[j].Name
 	})
 	for _, l := range c.Links {
+
+		eps := l.GetEndpoints()
+
 		gtopo.Links = append(gtopo.Links, clab.Link{
-			Source:         l.A.Node.ShortName,
-			SourceEndpoint: l.A.EndpointName,
-			Target:         l.B.Node.ShortName,
-			TargetEndpoint: l.B.EndpointName,
+			Source:         eps[0].GetNode().GetShortName(),
+			SourceEndpoint: eps[0].GetIfaceName(),
+			Target:         eps[1].GetNode().GetShortName(),
+			TargetEndpoint: eps[1].GetIfaceName(),
 		})
 	}
 
@@ -121,9 +147,17 @@ func init() {
 		"HTTP server address serving the topology view")
 	graphCmd.Flags().BoolVarP(&offline, "offline", "o", false,
 		"use only information from topo file when building graph")
-	graphCmd.Flags().BoolVarP(&dot, "dot", "", false, "generate dot file instead of launching the web server")
+	graphCmd.Flags().BoolVarP(&dot, "dot", "", false, "generate dot file")
+	graphCmd.Flags().BoolVarP(&mermaid, "mermaid", "", false, "print mermaid flowchart to stdout")
+	graphCmd.Flags().StringVarP(&mermaidDirection, "mermaid-direction", "", "TD", "specify direction of mermaid dirgram")
+	graphCmd.Flags().BoolVarP(&drawio, "drawio", "", false, "generate drawio diagram file")
+	graphCmd.Flags().StringVarP(&drawioVersion, "drawio-version", "", "latest",
+		"version of the clab-io-draw container to use for generating drawio diagram file")
 	graphCmd.Flags().StringVarP(&tmpl, "template", "", defaultGraphTemplatePath,
 		"Go html template used to generate the graph")
 	graphCmd.Flags().StringVarP(&staticDir, "static-dir", "", defaultStaticPath,
 		"Serve static files from the specified directory")
+	graphCmd.Flags().StringSliceVarP(&nodeFilter, "node-filter", "", []string{},
+		"comma separated list of nodes to include")
+	graphCmd.MarkFlagsMutuallyExclusive("dot", "mermaid", "drawio")
 }

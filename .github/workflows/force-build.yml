@@ -7,19 +7,20 @@ on:
 
 # make sure those env vars are aligned with the ones in ci-cd.yml workflow
 env:
-  GOVER: 1.18.4
+  GO_VER: "1.21.8"
   CGO_ENABLED: 0
-  MKDOCS_INS_VER: 8.4.3-insiders-4.22.1
-  GORELEASER_VER: v0.180.3
+  MKDOCS_INS_VER: 9.5.9-insiders-4.52.2-hellt
+  GORELEASER_VER: v1.11.4
+  PY_VER: "3.10"
 
 jobs:
   get-tag:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     outputs:
       git_tag: ${{ steps.git_tag.outputs.git_tag }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Get git tag
@@ -31,32 +32,26 @@ jobs:
   build-and-release:
     needs: get-tag
     if: ${{ needs.get-tag.outputs.git_tag != '' }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GOVER }}
 
-      - name: Install upx
-        run: |
-          sudo apt update && sudo apt install -y libucl1
-          curl -L http://archive.ubuntu.com/ubuntu/pool/universe/u/upx-ucl/upx-ucl_3.96-2_amd64.deb -o /tmp/upx.deb
-          sudo dpkg -i /tmp/upx.deb
-
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@v5
         with:
           version: ${{ env.GORELEASER_VER }}
           args: release --rm-dist
@@ -66,16 +61,16 @@ jobs:
 
   publish-docs:
     needs: build-and-release
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     if: contains(github.ref, '-') != true # do not publish docs for beta releases which will have something like v0.0.0-0.33.0-beta
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

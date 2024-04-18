@@ -5,19 +5,39 @@ hide:
 
 # Community
 
-Containerlab openness and focus on multivendor labs was a key to its success and adoption. With more than a dozen Network Operating Systems spread across several networking vendors and opensource teams, it is a tool that can answer the needs of a broad network engineers community.
+Containerlab openness and focus on multivendor labs were key to its success and adoption. With more than a dozen Network Operating Systems spread across several networking vendors and opensource teams, it is a tool that can answer the needs of a broad network engineers community.
 
-## Discord Server
+## Chat servers
 
-Growing the number of supported NOSes is a task that can't be done by a single person, and there the community role is adamant. To support and cherish the growing containerlab community and provide better feedback and discussions platform, we launched containerlab's own Discord server.
+### Discord
+
+Growing the number of supported NOSes is a task that can't be done by a single person, and there the community role is adamant. To support and cherish the growing containerlab community and provide better feedback and discussions platform, we launched containerlab's official Discord server where maintainers and users hang out.
 
 Everybody is welcome to join and chat with our community members about all things containerlab!
 
 <center>[:fontawesome-brands-discord: Join Containerlab Discord Server](https://discord.gg/vAyddtaEV9){ .md-button .md-button--primary }</center>
 
+### IRC
+
+For those who cherish IRC in their hearts, a community-led IRC channel `#containerlab` is available at [IRC Libera server](https://libera.chat/).
+
 ## In The Media
 
 We are always happy to showcase containerlab and demonstrate its powers. Luckily, the network engineering community has lots of events worldwide, and we participated in some. Below you will find recordings of containerlab talks in different formats and on various venues listed in reverse chronological order[^1].
+
+### NFD 33
+
+<small>:material-youtube: [Lab as Code with Containerlab](https://www.youtube.com/watch?v=rjZjerjTrSY) · :material-calendar: 2023-10-30</small>
+
+Three years in the making with monthly releases, containerlab has become a de-facto standard for network engineers to build and run containerized network labs. In this talk, Roman explains the motivation behind containerlab, the benefits of defining labs as code, and shows *containerlab workflow* in action by spinning up [SR Linux Telemetry Lab](https://github.com/srl-labs/srl-telemetry-lab).
+
+<div class="iframe-container">
+<iframe width="100%" src="https://www.youtube.com/embed/rjZjerjTrSY" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+</div>
+
+Participants:
+
+* [:material-twitter:][rdodin-twitter][:material-linkedin:][rdodin-linkedin] Roman Dodin
 
 ### Telco podcast
 
@@ -102,6 +122,26 @@ The power of the community is in its members. We are delighted to have container
 
 This section logs the most notable blogs, streams, and and demos delivered by containerlab users worldwide.
 
+### Powering up your Netbox labs with Containerlab
+
+<small>:material-text: [Blog](https://netboxlabs.com/blog/network-configuration-assurance-with-netbox-and-ansible/) by [Rich Bibby](https://netboxlabs.com/author/richard-bibby/) · :material-calendar: 2024-03-20</small>
+
+Our friends at NetboxLabs have authored a nice blog post - Network Configuration Assurance With NetBox and Ansible - and they have used containerlab to create a lab environment to present their solution.
+
+It is always great to see containerlab being used to augment other tools and solutions, providing the glue between the applications and the network devices all within a tiny declarative packaging and a lightweight CLI to make it all work.
+
+### Containerlab - Creating Network Labs Can't Be Any Easier
+
+<small>:material-text: [Blog](https://www.packetswitch.co.uk/containerlabs-intro/) by [Suresh Vina](https://www.linkedin.com/in/suresh-vina-282545a9) · :material-calendar: 2024-03-15</small>
+
+Suresh, a Networking enthusiast based in the lovely city of London, shares his experience with Containerlab after being married to traditional lab emulation tools for a long time. He explains Containerlab's core concepts using a lab with cEOS and Palo Alto nodes, showcasing the ease of use and flexibility of the tool in a multivendor setting.
+
+### Rapid deployment of Cilium BGP environments using Containerlab + Kind
+
+<small>:material-text: [Blog](https://www.sobyte.net/post/2022-09/containerlab-kind-cilium-bgp/) by [SoByte](https://www.sobyte.net/about/) · :material-calendar: 2022-09-02</small>
+
+A clever use of KinD and containerlab to deploy a k8s cluster with a network underlay to test Cilium's BGP capabilities.
+
 ### Cilium BGP tested with Containerlab
 
 <small>:material-youtube: [screencast](https://www.youtube.com/watch?v=AXTKS0WCXjE) by [Nico Vibert](https://twitter.com/nicovibert) · :material-calendar: 2022-07-20</small>
@@ -116,7 +156,7 @@ Clever use of containerlab with a focus on the workload capabilities and integra
 
 <small>:material-youtube: [screencast](https://www.youtube.com/watch?v=dL-P1ebTu_0) by [Inmanta](https://www.youtube.com/channel/UCuhO5ol5yTBhlr-p4xfNYhA) · :material-calendar: 2022-03-20</small>
 
-Inmanta is a network orchestration and automation platform. In these [YouTube series](https://www.youtube.com/watch?v=dL-P1ebTu_0), Inmanta's engineer explains how this platform can help you manage network infrastructure provided by Containerlab. Make sure to check subsequent videos in their channel where multiple angles of containerlab are shown. 
+Inmanta is a network orchestration and automation platform. In these [YouTube series](https://www.youtube.com/watch?v=dL-P1ebTu_0), Inmanta's engineer explains how this platform can help you manage network infrastructure provided by Containerlab. Make sure to check subsequent videos in their channel where multiple angles of containerlab are shown.
 
 ### Containerlab-based DDOS testbed
 
@@ -142,7 +182,6 @@ I’ve been progressing through a series of technical books, some of which I’v
 
 In this post, we look at how Containerlab can be used to quickly spin up vQFX topologies for network validation and testing. We’ll walk through the entire process - how to build docker images from vQFX images, what happens behind the scenes when bringing these containers up and how to build/verify your topology.
 
-
 ### Multipoint Redistribution and SR Linux
 
 <small>:material-text: [Blog](https://juliopdx.com/2022/01/22/multipoint-redistribution-and-sr-linux/) by [@JulioPDX](https://twitter.com/Julio_PDX) · :material-calendar: 2022-01-22</small>
@@ -159,14 +198,6 @@ As Peter wrote, sFlow is a companion to the Streaming Telemetry applications. It
 
 Discussions: [:material-twitter:](https://twitter.com/sFlow/status/1495804147177775104)
 
-### Network Modeling: Automating Mikrotik RouterOS CHR Containerlab images
-
-<small>:material-text: [Blog](https://stubarea51.net/2021/12/20/network-modeling-automating-mikrotik-routeros-chr-containerlab-images/) by [@nlgotz](https://twitter.com/nlgotz) · :material-calendar: 2021-12-20</small>
-
-A [blogpost](https://stubarea51.net/2021/12/20/network-modeling-automating-mikrotik-routeros-chr-containerlab-images/) showing how to build containerlab images for the Mikrotik CHR, and how you can avoid having to build them yourself using Docker.
-
-Discussions: [:material-twitter:](https://twitter.com/nlgotz/status/1472941962345033728)
-
 ### My Journey and Experience with Containerlab
 
 <small>:material-text: [Blog](https://juliopdx.com/2021/12/10/my-journey-and-experience-with-containerlab/) by [@JulioPDX](https://twitter.com/Julio_PDX) · :material-calendar: 2021-12-10</small>
@@ -174,18 +205,6 @@ Discussions: [:material-twitter:](https://twitter.com/nlgotz/status/147294196234
 In [this blog](https://juliopdx.com/2021/12/10/my-journey-and-experience-with-containerlab/) Julio took containerlab for a spin and shares his experience with it. His lab consists of a few Arista cEOS nodes which he then provisions with Nornir, using [Ansible inventory](manual/inventory.md) generated by containerlab.
 
 Discussions: [:material-twitter:](https://twitter.com/Julio_PDX/status/1469562531689631745) · [:material-linkedin:](https://www.linkedin.com/feed/update/urn:li:activity:6875328740948344832/)
-
-### Network Modeling: Segmented Lab access with Containerlab and ZeroTier
-
-<small>:material-text: [Blog](https://stubarea51.net/2021/11/23/network-modeling-segmented-lab-access-with-containerlab-and-zerotier/) by [@nlgotz](https://twitter.com/nlgotz) · :material-calendar: 2021-11-23</small>
-
-When building out network labs, often multiple people will need access to the lab. The main way right now is to use something like EVE-NG or GNS3 to provide access.
-
-There are 2 downsides to this method. The first is that your server is exposed to the internet and if your usernames/passwords aren’t strong enough, your server can become compromised. The second is that sometimes you may not want everyone to be able to add or edit to the lab topology.
-
-The solution to this is using Containerlab and ZeroTier. This setup is great for things like testing new hires, training classes, or for providing lab access to others on a limited basis.
-
-Discussions: [:material-twitter:](https://twitter.com/stubarea51/status/1463217901800935427)
 
 ### Building Your Own Data Center Fabric with Containerlab
 

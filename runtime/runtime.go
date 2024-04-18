@@ -6,14 +6,13 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+	"github.com/srl-labs/containerlab/clab/exec"
+	"github.com/srl-labs/containerlab/links"
 	"github.com/srl-labs/containerlab/types"
-)
-
-const (
-	DockerRuntime = "docker"
-	IgniteRuntime = "ignite"
 )
 
 type ContainerRuntime interface {
@@ -32,12 +31,12 @@ type ContainerRuntime interface {
 	// Delete container (bridge) network
 	DeleteNet(context.Context) error
 	// Pull container image if not present
-	PullImageIfRequired(context.Context, string) error
+	PullImage(context.Context, string, types.PullPolicyValue) error
 	// CreateContainer creates a container, but does not start it
 	CreateContainer(context.Context, *types.NodeConfig) (string, error)
 	// Start pre-created container by its name. Returns an extra interface that can be used to receive signals
 	// about the container life-cycle after it was created, e.g. for post-deploy tasks
-	StartContainer(context.Context, string, *types.NodeConfig) (interface{}, error)
+	StartContainer(context.Context, string, Node) (interface{}, error)
 	// Stop running container by its name
 	StopContainer(context.Context, string) error
 	// Pause a container identified by its name
@@ -45,13 +44,13 @@ type ContainerRuntime interface {
 	// UnPause / resume a container identified by its name
 	UnpauseContainer(context.Context, string) error
 	// List all containers matching labels
-	ListContainers(context.Context, []*types.GenericFilter) ([]types.GenericContainer, error)
-	// Get a netns path using the pid of a container
+	ListContainers(context.Context, []*types.GenericFilter) ([]GenericContainer, error)
+	// Get a netns path using the name of a container
 	GetNSPath(context.Context, string) (string, error)
 	// Executes cmd on container identified with id and returns stdout, stderr bytes and an error
-	Exec(context.Context, string, []string) ([]byte, []byte, error)
+	Exec(ctx context.Context, cID string, execCmd *exec.ExecCmd) (*exec.ExecResult, error)
 	// ExecNotWait executes cmd on container identified with id but doesn't wait for output nor attaches stdout/err
-	ExecNotWait(context.Context, string, []string) error
+	ExecNotWait(ctx context.Context, cID string, execCmd *exec.ExecCmd) error
 	// Delete container by its name
 	DeleteContainer(context.Context, string) error
 	// Getter for runtime config options
@@ -59,7 +58,19 @@ type ContainerRuntime interface {
 	GetName() string
 	// GetHostsPath returns fs path to a file which is mounted as /etc/hosts into a given container
 	GetHostsPath(context.Context, string) (string, error)
+	// GetContainerStatus retrieves the ContainerStatus of the named container
+	GetContainerStatus(ctx context.Context, cID string) ContainerStatus
+	// IsHealthy returns true is the container is reported as being healthy, false otherwise
+	IsHealthy(ctx context.Context, cID string) (bool, error)
 }
+
+type ContainerStatus string
+
+const (
+	NotFound = "NotFound"
+	Running  = "Running"
+	Stopped  = "Stopped"
+)
 
 type Initializer func() ContainerRuntime
 
@@ -70,6 +81,7 @@ type RuntimeConfig struct {
 	GracefulShutdown bool
 	Debug            bool
 	KeepMgmtNet      bool
+	VerifyLinkParams *links.VerifyLinkParams
 }
 
 var ContainerRuntimes = map[string]Initializer{}
@@ -94,4 +106,54 @@ func WithKeepMgmtNet() RuntimeOption {
 	return func(r ContainerRuntime) {
 		r.WithKeepMgmtNet()
 	}
+}
+
+// WaitForContainerRunning waits for container to become running by polling its status.
+func WaitForContainerRunning(ctx context.Context, r ContainerRuntime, contName, nodeName string) error {
+	// how long to wait for the external container to become running
+	statusCheckTimeout := 15 * time.Minute
+	// frequency to check for new container state
+	statusCheckFrequency := 3 * time.Second
+
+	// setup a ticker
+	ticker := time.NewTicker(statusCheckFrequency)
+	// timeout sets the specified timeout
+	timeout := time.After(statusCheckTimeout)
+	// startTime is used to calculate elapsed waiting time
+	startTime := time.Now()
+
+	resultErr := fmt.Errorf("node %q waited %s for external dependency container %q to come up, which did not happen. Giving up now",
+		nodeName, time.Since(startTime), contName)
+
+TIMEOUT_LOOP:
+	for {
+		select {
+		case <-ticker.C:
+			runtimeStatus := r.GetContainerStatus(ctx, contName)
+
+			// if the dependency container is running we are allowed to schedule the node
+			if runtimeStatus == Running {
+				// reset resultErr to nil
+				resultErr = nil
+				break TIMEOUT_LOOP
+			}
+
+			// if not, log and retry
+			log.Infof("node %q depends on external container %q, which is not running yet. Waited %s. Retrying...",
+				nodeName, contName, time.Since(startTime).Truncate(time.Second))
+
+		case <-timeout:
+			log.Errorf("node %q waited %s for external dependency container %q to come up, which did not happen. Giving up now",
+				nodeName, time.Since(startTime), contName)
+			break TIMEOUT_LOOP
+		}
+	}
+	return resultErr
+}
+
+// Node is an interface that represents a node in the lab
+// and is implemented by containerlab nodes.
+type Node interface {
+	Config() *types.NodeConfig
+	GetEndpoints() []links.Endpoint
 }

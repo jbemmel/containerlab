@@ -17,8 +17,10 @@ builds:
     goarch:
       - amd64
       - arm64
-    hooks:
-      post: upx "{{ .Path }}"
+    # removing upx compression due to https://github.com/srl-labs/containerlab/issues/1264
+    # hooks:
+    #   post:
+    #     - upx "{{ .Path }}"
 dockers:
   - goos: linux
     goarch: amd64
@@ -28,8 +30,7 @@ dockers:
       - 'ghcr.io/srl-labs/clab:{{ replace .Version "v" ""}}'
     dockerfile: goreleaser.dockerfile
 archives:
-  - replacements:
-      linux: Linux
+  - name_template: '{{ .ProjectName }}_{{ replace .Version "v" "" }}_{{ .Os }}_{{ .Arch }}'
     files:
       - lab-examples/**/*
       - templates/**/*
@@ -46,17 +47,13 @@ publishers:
 release:
   prerelease: auto
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
+  use: github-native
 
 nfpms:
   - id: containerlab-nfpms
-    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    file_name_template: '{{ .ProjectName }}_{{ replace .Version "v" "" }}_{{ .Os }}_{{ .Arch }}'
     package_name: containerlab
-    maintainer: Wim Henderickx <wim.henderickx@nokia.com>, Karim Radhouani <medkarimrdi@gmail.com>, Roman Dodin <dodin.roman@gmail.com>
+    maintainer: Roman Dodin <dodin.roman@gmail.com>, Markus Vahlenkamp <markus.vahlenkamp@nokia.com>, Karim Radhouani <medkarimrdi@gmail.com>
     homepage: https://containerlab.dev
     description: |
       containerlab deploys containerized networking topologies
@@ -66,6 +63,8 @@ nfpms:
       - rpm
       - deb
       - apk
+    scripts:
+      postinstall: ./utils/postinstall.sh
     bindir: /usr/bin
     contents:
       - src: ./lab-examples

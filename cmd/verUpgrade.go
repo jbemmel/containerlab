@@ -7,7 +7,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,7 +22,7 @@ var upgradeCmd = &cobra.Command{
 	Short:   "upgrade containerlab to latest available version",
 	PreRunE: sudoCheck,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		f, err := ioutil.TempFile("", "containerlab")
+		f, err := os.CreateTemp("", "containerlab")
 		defer os.Remove(f.Name())
 		if err != nil {
 			return fmt.Errorf("failed to create temp file: %w", err)
@@ -31,7 +30,10 @@ var upgradeCmd = &cobra.Command{
 		_ = downloadFile(downloadURL, f)
 
 		c := exec.Command("bash", f.Name())
-		// c.Stdin = os.Stdin
+		// pass the environment variables to the upgrade script
+		// so that GITHUB_TOKEN is available
+		c.Env = os.Environ()
+
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
 		err = c.Run()

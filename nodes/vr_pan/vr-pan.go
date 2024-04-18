@@ -7,103 +7,80 @@ package vr_pan
 import (
 	"context"
 	"fmt"
+	"path"
 
-	"github.com/cloudflare/cfssl/log"
 	"github.com/srl-labs/containerlab/nodes"
-	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
 	"github.com/srl-labs/containerlab/utils"
 )
 
-var kindnames = []string{"vr-pan", "vr-paloalto_panos"}
-
-const (
-	defaultUser     = "admin"
-	defaultPassword = "Admin@123"
+var (
+	kindnames          = []string{"paloalto_panos", "vr-pan", "vr-paloalto_panos"}
+	defaultCredentials = nodes.NewCredentials("admin", "Admin@123")
 )
 
-func init() {
-	nodes.Register(kindnames, func() nodes.Node {
+const (
+	configDirName   = "config"
+	startupCfgFName = "startup-config.cfg"
+)
+
+// Register registers the node in the NodeRegistry.
+func Register(r *nodes.NodeRegistry) {
+	r.Register(kindnames, func() nodes.Node {
 		return new(vrPan)
-	})
-	err := nodes.SetDefaultCredentials(kindnames, defaultUser, defaultPassword)
-	if err != nil {
-		log.Error(err)
-	}
+	}, defaultCredentials)
 }
 
 type vrPan struct {
-	cfg     *types.NodeConfig
-	mgmt    *types.MgmtNet
-	runtime runtime.ContainerRuntime
+	nodes.DefaultNode
 }
 
-func (s *vrPan) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
-	s.cfg = cfg
+func (n *vrPan) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
+	// Init DefaultNode
+	n.DefaultNode = *nodes.NewDefaultNode(n)
+	// set virtualization requirement
+	n.HostRequirements.VirtRequired = true
+
+	n.Cfg = cfg
 	for _, o := range opts {
-		o(s)
+		o(n)
 	}
 	// env vars are used to set launch.py arguments in vrnetlab container
 	defEnv := map[string]string{
-		"USERNAME":           defaultUser,
-		"PASSWORD":           defaultPassword,
+		"USERNAME":           defaultCredentials.GetUsername(),
+		"PASSWORD":           defaultCredentials.GetPassword(),
 		"CONNECTION_MODE":    nodes.VrDefConnMode,
 		"VCPU":               "2",
 		"RAM":                "6144",
-		"DOCKER_NET_V4_ADDR": s.mgmt.IPv4Subnet,
-		"DOCKER_NET_V6_ADDR": s.mgmt.IPv6Subnet,
+		"DOCKER_NET_V4_ADDR": n.Mgmt.IPv4Subnet,
+		"DOCKER_NET_V6_ADDR": n.Mgmt.IPv6Subnet,
 	}
-	s.cfg.Env = utils.MergeStringMaps(defEnv, s.cfg.Env)
+	n.Cfg.Env = utils.MergeStringMaps(defEnv, n.Cfg.Env)
 
-	if s.cfg.Env["CONNECTION_MODE"] == "macvtap" {
+	// mount config dir to support startup-config functionality
+	n.Cfg.Binds = append(n.Cfg.Binds, fmt.Sprint(path.Join(n.Cfg.LabDir, configDirName), ":/config"))
+
+	if n.Cfg.Env["CONNECTION_MODE"] == "macvtap" {
 		// mount dev dir to enable macvtap
-		s.cfg.Binds = append(s.cfg.Binds, "/dev:/dev")
+		n.Cfg.Binds = append(n.Cfg.Binds, "/dev:/dev")
 	}
 
-	s.cfg.Cmd = fmt.Sprintf("--username %s --password %s --hostname %s --connection-mode %s --trace",
-		s.cfg.Env["USERNAME"], s.cfg.Env["PASSWORD"], s.cfg.ShortName, s.cfg.Env["CONNECTION_MODE"])
-
-	// set virtualization requirement
-	s.cfg.HostRequirements.VirtRequired = true
+	n.Cfg.Cmd = fmt.Sprintf("--username %s --password %s --hostname %s --connection-mode %s --trace",
+		defaultCredentials.GetUsername(), defaultCredentials.GetPassword(), n.Cfg.ShortName, n.Cfg.Env["CONNECTION_MODE"])
 
 	return nil
 }
 
-func (s *vrPan) Config() *types.NodeConfig { return s.cfg }
-
-func (s *vrPan) PreDeploy(_, _, _ string) error {
-	utils.CreateDirectory(s.cfg.LabDir, 0777)
-	return nil
-}
-
-func (s *vrPan) Deploy(ctx context.Context) error {
-	cID, err := s.runtime.CreateContainer(ctx, s.cfg)
+func (n *vrPan) PreDeploy(_ context.Context, params *nodes.PreDeployParams) error {
+	utils.CreateDirectory(n.Cfg.LabDir, 0777)
+	_, err := n.LoadOrGenerateCertificate(params.Cert, params.TopologyName)
 	if err != nil {
-		return err
+		return nil
 	}
-	_, err = s.runtime.StartContainer(ctx, cID, s.cfg)
-	return err
+	return nodes.LoadStartupConfigFileVr(n, configDirName, startupCfgFName)
 }
 
-func (*vrPan) PostDeploy(_ context.Context, _ map[string]nodes.Node) error {
-	return nil
-}
-
-func (s *vrPan) GetImages() map[string]string {
-	return map[string]string{
-		nodes.ImageKey: s.cfg.Image,
-	}
-}
-
-func (*vrPan) Destroy(_ context.Context) error          { return nil }
-func (s *vrPan) WithMgmtNet(mgmt *types.MgmtNet)        { s.mgmt = mgmt }
-func (s *vrPan) WithRuntime(r runtime.ContainerRuntime) { s.runtime = r }
-func (s *vrPan) GetRuntime() runtime.ContainerRuntime   { return s.runtime }
-
-func (s *vrPan) Delete(ctx context.Context) error {
-	return s.runtime.DeleteContainer(ctx, s.cfg.LongName)
-}
-
-func (*vrPan) SaveConfig(_ context.Context) error {
-	return nil
+// CheckInterfaceName checks if a name of the interface referenced in the topology file correct.
+func (n *vrPan) CheckInterfaceName() error {
+	return nodes.GenericVMInterfaceCheck(n.Cfg.ShortName, n.Endpoints)
 }

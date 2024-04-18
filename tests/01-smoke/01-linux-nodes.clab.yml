@@ -11,7 +11,8 @@ topology:
       image: alpine:3
       cmd: ash -c "echo $MYVAR > /tmp/var && sleep 9999"
       binds:
-        - /tmp/clab-01-test.txt:/01-test.txt
+        - 01-test.txt:/01-test.txt
+        - 01-test.json:/test.json
       env:
         MYVAR: MYVAR is SET
       exec:
@@ -19,18 +20,60 @@ topology:
         - cat /etc/os-release
       cpu: 1.5
       memory: 1G
+      mgmt_ipv4: 172.20.20.99 # test deprecated mgmt_ipv4 still works
+      mgmt_ipv6: 2001:172:20:20::99 # test deprecated mgmt_ipv6 still works
+      healthcheck:
+        test:
+          - CMD-SHELL
+          - cat /etc/os-release
+        start-period: 3
+        retries: 1
+        interval: 5
+        timeout: 2
     l2:
       kind: linux
       image: nginx:stable-alpine
       ports:
         - 56180:80
-      mgmt_ipv4: 172.20.20.100
-      mgmt_ipv6: 2001:172:20:20::100
+      mgmt-ipv4: 172.20.20.100
+      mgmt-ipv6: 2001:172:20:20::100
+      dns:
+        servers:
+          - 8.8.8.8
+          - 1.2.3.4
+        search:
+          - my.domain
+        options:
+          - rotate
     l3:
       kind: linux
       image: nginx:stable-alpine
       network-mode: host
 
   links:
-    - endpoints: ["l1:eth1", "l2:eth1"]
+    - endpoints: ["l1:eth1", "l2:some1"]
+      mtu: 2000
+      vars:
+        foo: bar
+        some: ["thing", "else"]
     - endpoints: ["l1:eth2", "l2:eth2"]
+    - type: veth
+      endpoints:
+        - node: l1
+          interface: eth3
+          mac: 02:00:00:00:00:00
+        - node: l2
+          interface: eth3
+          mac: 02:00:00:00:00:01
+    - type: host
+      host-interface: l2eth4
+      endpoint:
+        node: l2
+        interface: eth4
+        mac: 02:00:00:00:00:04
+    - type: mgmt-net
+      host-interface: l2eth5mgmt
+      endpoint:
+        node: l2
+        interface: eth5
+        mac: 02:00:00:00:00:05

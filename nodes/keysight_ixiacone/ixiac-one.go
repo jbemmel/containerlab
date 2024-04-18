@@ -11,8 +11,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/srl-labs/containerlab/clab/exec"
 	"github.com/srl-labs/containerlab/nodes"
-	"github.com/srl-labs/containerlab/runtime"
 	"github.com/srl-labs/containerlab/types"
 )
 
@@ -26,19 +26,22 @@ var ixiacStatusConfig = struct {
 	readyFileName:       "/home/keysight/ixia-c-one/init-done",
 }
 
-func init() {
-	nodes.Register(kindnames, func() nodes.Node {
+// Register registers the node in the NodeRegistry.
+func Register(r *nodes.NodeRegistry) {
+	r.Register(kindnames, func() nodes.Node {
 		return new(ixiacOne)
-	})
+	}, nil)
 }
 
 type ixiacOne struct {
-	cfg     *types.NodeConfig
-	runtime runtime.ContainerRuntime
+	nodes.DefaultNode
 }
 
 func (l *ixiacOne) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
-	l.cfg = cfg
+	// Init DefaultNode
+	l.DefaultNode = *nodes.NewDefaultNode(l)
+
+	l.Cfg = cfg
 	for _, o := range opts {
 		o(l)
 	}
@@ -46,53 +49,23 @@ func (l *ixiacOne) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
 	return nil
 }
 
-func (l *ixiacOne) Config() *types.NodeConfig { return l.cfg }
-
-func (*ixiacOne) PreDeploy(_, _, _ string) error { return nil }
-
-func (l *ixiacOne) Deploy(ctx context.Context) error {
-	cID, err := l.runtime.CreateContainer(ctx, l.cfg)
-	if err != nil {
-		return err
-	}
-	_, err = l.runtime.StartContainer(ctx, cID, l.cfg)
-	return err
-}
-
-func (l *ixiacOne) PostDeploy(ctx context.Context, _ map[string]nodes.Node) error {
-	log.Infof("Running postdeploy actions for keysight_ixia-c-one '%s' node", l.cfg.ShortName)
-	return ixiacPostDeploy(ctx, l.runtime, l.cfg)
-}
-
-func (l *ixiacOne) GetImages() map[string]string {
-	images := make(map[string]string)
-	images[nodes.ImageKey] = l.cfg.Image
-	return images
-}
-
-func (*ixiacOne) WithMgmtNet(*types.MgmtNet)               {}
-func (l *ixiacOne) WithRuntime(r runtime.ContainerRuntime) { l.runtime = r }
-func (l *ixiacOne) GetRuntime() runtime.ContainerRuntime   { return l.runtime }
-
-func (l *ixiacOne) Delete(ctx context.Context) error {
-	return l.runtime.DeleteContainer(ctx, l.Config().LongName)
-}
-
-func (*ixiacOne) SaveConfig(_ context.Context) error {
-	return nil
+func (l *ixiacOne) PostDeploy(ctx context.Context, _ *nodes.PostDeployParams) error {
+	log.Infof("Running postdeploy actions for keysight_ixia-c-one '%s' node", l.Cfg.ShortName)
+	return l.ixiacPostDeploy(ctx)
 }
 
 // ixiacPostDeploy runs postdeploy actions which are required for keysight_ixia-c-one node.
-func ixiacPostDeploy(ctx context.Context, r runtime.ContainerRuntime, cfg *types.NodeConfig) error {
-	ixiacOneCmd := fmt.Sprintf("ls %s", ixiacStatusConfig.readyFileName)
+func (l *ixiacOne) ixiacPostDeploy(ctx context.Context) error {
+	ixiacOneCmd := fmt.Sprintf("bash -c 'ls %s'", ixiacStatusConfig.readyFileName)
 	statusInProgressMsg := fmt.Sprintf("ls: %s: No such file or directory", ixiacStatusConfig.readyFileName)
 	for {
-		_, stderr, err := r.Exec(ctx, cfg.LongName, []string{"bash", "-c", ixiacOneCmd})
+		cmd, _ := exec.NewExecCmdFromString(ixiacOneCmd)
+		execResult, err := l.RunExec(ctx, cmd)
 		if err != nil {
 			return err
 		}
-		if stderr != nil {
-			msg := strings.TrimSuffix(string(stderr), "\n")
+		if len(execResult.GetStdErrString()) > 0 {
+			msg := strings.TrimSuffix(execResult.GetStdErrString(), "\n")
 			if msg != statusInProgressMsg {
 				return err
 			}

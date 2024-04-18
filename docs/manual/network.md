@@ -7,6 +7,7 @@ In this document we will discuss the networking concepts that containerlab emplo
 2. Interconnect containers to create network topologies of users choice
 
 ## Management network
+
 As governed by the well-established container [networking principles](https://docs.docker.com/network/) containers are able to get network connectivity using various drivers/methods. The most common networking driver that is enabled by default for docker-managed containers is the [bridge driver](https://docs.docker.com/network/bridge/).
 
 The bridge driver connects containers to a linux bridge interface named `docker0` on most linux operating systems. The containers are then able to communicate with each other and the host via this virtual switch (bridge interface).
@@ -18,14 +19,14 @@ name: srl02
 
 topology:
   kinds:
-    srl:
+    nokia_srlinux:
       type: ixrd3
       image: ghcr.io/nokia/srlinux
   nodes:
     srl1:
-      kind: srl
+      kind: nokia_srlinux
     srl2:
-      kind: srl
+      kind: nokia_srlinux
 
   links:
     - endpoints: ["srl1:e1-1", "srl2:e1-1"]
@@ -38,13 +39,14 @@ As seen from the topology definition file, the lab consists of the two SR Linux 
 The diagram above shows that these two nodes are not only interconnected between themselves, but also connected to a bridge interface on the lab host. This is driven by the containerlab default management network settings.
 
 ### default settings
+
 When no information about the management network is provided within the topo definition file, containerlab will do the following
 
 1. create, if not already created, a docker network named `clab`
 2. configure the IPv4/6 addressing pertaining to this docker network
 
 !!!info
-    We often refer to `clab` docker network simply as _management network_ since its the network to which management interfaces of the containerized NOS'es are connected.
+    We often refer to `clab` docker network simply as _management network_ since it's the network to which management interfaces of the containerized NOS'es are connected.
 
 The addressing information that containerlab will use on this network:
 
@@ -89,6 +91,7 @@ The output above shows that srl1 container has been assigned `172.20.20.3/24 / 2
 ```
 
 Now it's possible to reach the assigned IP address from the lab host as well as from other containers connected to this management network.
+
 ```bash
 # ping srl1 management interface from srl2
 ❯ docker exec -it clab-srl02-srl2 sr_cli "ping 172.20.20.3 network-instance mgmt"
@@ -102,9 +105,11 @@ PING 172.20.20.3 (172.20.20.3) 56(84) bytes of data.
     If you run multiple labs without changing the default management settings, the containers of those labs will end up connecting to the same management network with their management interface.
 
 ### host mode networking
+
 In addition to the bridge-based management network containerlab supports launching nodes in [host networking mode](https://docs.docker.com/network/host/). In this mode containers are attached to the host network namespace. Host mode is enabled with [network-mode](nodes.md#network-mode) node setting.
 
 ### configuring management network
+
 Most of the time there is no need to change the defaults for management network configuration, but sometimes it is needed. For example, it might be that the default network ranges are overlapping with the existing addressing scheme on the lab host, or it might be desirable to have predefined management IP addresses.
 
 For such cases, the users need to add the `mgmt` container at the top level of their topology definition file:
@@ -114,16 +119,17 @@ name: srl02
 
 mgmt:
   network: custom_mgmt                # management network name
-  ipv4_subnet: 172.100.100.0/24       # ipv4 range
-  ipv6_subnet: 2001:172:100:100::/80  # ipv6 range (optional)
+  ipv4-subnet: 172.100.100.0/24       # ipv4 range
+  ipv6-subnet: 2001:172:100:100::/80  # ipv6 range (optional)
 
 topology:
 # the rest of the file is omitted for brevity
 ```
 
-With these settings in place, container will get their IP addresses from the specified ranges accordingly.
+With these settings in place, the container will get their IP addresses from the specified ranges accordingly.
 
 #### user-defined addresses
+
 By default, container runtime will assign the management IP addresses for the containers. But sometimes, it's helpful to have user-defined addressing in the management network.
 
 For such cases, users can define the desired IPv4/6 addresses on a per-node basis:
@@ -131,15 +137,15 @@ For such cases, users can define the desired IPv4/6 addresses on a per-node basi
 ```yaml
 mgmt:
   network: fixedips
-  ipv4_subnet: 172.100.100.0/24
-  ipv6_subnet: 2001:172:100:100::/80
+  ipv4-subnet: 172.100.100.0/24
+  ipv6-subnet: 2001:172:100:100::/80
 
 topology:
   nodes:
     n1:
-      kind: srl
-      mgmt_ipv4: 172.100.100.11       # set ipv4 address on management network
-      mgmt_ipv6: 2001:172:100:100::11 # set ipv6 address on management network
+      kind: nokia_srlinux
+      mgmt-ipv4: 172.100.100.11       # set ipv4 address on management network
+      mgmt-ipv6: 2001:172:100:100::11 # set ipv6 address on management network
 ```
 
 Users can specify either IPv4 or IPv6 or both addresses. If one of the addresses is omitted, it will be assigned by container runtime in an arbitrary fashion.
@@ -147,8 +153,10 @@ Users can specify either IPv4 or IPv6 or both addresses. If one of the addresses
 !!!note
     1. If user-defined IP addresses are needed, they must be provided for all containers attached to a given network to avoid address collision.
     2. IPv4/6 addresses set on a node level must be from the management network range.
+    3. IPv6 addresses are truncated by Docker[^1], therefore do not use bytes 5 through 8 of the IPv6 network range.
 
 #### MTU
+
 The MTU of the management network defaults to an MTU value of `docker0` interface, but it can be set to a user defined value:
 
 ```yaml
@@ -160,6 +168,7 @@ mgmt:
 This will result in every interface connected to that network to inherit this MTU value.
 
 #### network name
+
 The default container network name is `clab`. To customize this name, users should specify a new value within the `network` element:
 
 ```yaml
@@ -168,6 +177,7 @@ mgmt:
 ```
 
 #### default docker network
+
 To make clab nodes start in the default docker network `bridge`, which uses the `docker0` bridge interface, users need to mention this explicitly in the configuration:
 
 ```yaml
@@ -178,6 +188,7 @@ mgmt:
 Since `bridge` network is created by default by docker, using its name in the configuration will make nodes to connect to this network.
 
 #### bridge name
+
 By default, containerlab will create a linux bridge backing the management docker network with the following name `br-<network-id>`. The network-id part is coming from the docker network ID that docker manages.
 
 We allow our users to change the bridge name that the management network will use. This can be used to connect containers to an already existing bridge with other workloads connected:
@@ -199,24 +210,41 @@ It is possible to set the desired gateway IP (that is the IP assigned to the bri
 mgmt:
   network: custom-net
   bridge: mybridge
-  ipv4_subnet: 10.20.30.0/24 # ip range for the docker network
+  ipv4-subnet: 10.20.30.0/24 # ip range for the docker network
   ipv4-gw: 10.20.30.100 # set custom gateway ip
 ```
 
-#### external access
-Starting with `0.24.0` release containerlab will enable external access to the nodes by default. This means that external systems/hosts will be able to communicate with the nodes of your topology without requiring any manual configuration.
+#### IP range
 
-To allow external communications containerlab installs a rule in the `DOCKER-USER` iptables chain, allowing all packets targeting containerlab's management network. The rule looks like follows:
+By specifying `ipv4-range/ipv6-range` under the management network, users limit the network range from which IP addresses are allocated for a management subnet.
+
+```yaml
+mgmt:
+  network: custom-net
+  ipv4-subnet: 10.20.30.0/24 #(2)!
+  ipv4-range: 10.20.30.128/25 #(1)!
+```
+
+1. Container runtime will assign IP addresses from the `10.20.30.128/25` subnet, and `10.20.30.0/25` will not be considered.
+2. The subnet must be specified for IP ranges to work. Also note that if the container network already exists and uses a different range, then the IP range setting won't have effect.
+
+With this approach, users can prevent IP address overlap with nodes deployed on the same management network by other orchestration systems.
+
+#### external access
+
+Containerlab will attempt to enable external access to the nodes by default. This means that external systems/hosts will be able to communicate with the nodes of your topology without requiring any manual iptables/nftables rules to be installed.
+
+To allow external communications containerlab installs a rule in the `DOCKER-USER` chain, allowing all packets targeting containerlab's management network. The rule looks like follows:
 
 ```shell
 ❯ sudo iptables -vnL DOCKER-USER
 Chain DOCKER-USER (1 references)
  pkts bytes target     prot opt in     out     source               destination         
-    0     0 ACCEPT     all  --  *      br-03d953ed46df  0.0.0.0/0            0.0.0.0/0 # (1)
- 768K 4728M RETURN     all  --  *      *       0.0.0.0/0            0.0.0.0/0          
+    0     0 ACCEPT     all  --  *      br-a8b9fc8b33a2  0.0.0.0/0            0.0.0.0/0            /* set by containerlab */
+12719   79M RETURN     all  --  *      *       0.0.0.0/0            0.0.0.0/0      
 ```
 
-1.  The `br-03d953ed46df` bridge interface is the interface that backs up the containerlab's management network.
+1. The `br-a8b9fc8b33a2` bridge interface is the interface that backs up the containerlab's management network (`clab` docker network).
 
 The rule will be removed together with the management network.
 
@@ -225,22 +253,34 @@ Should you not want to enable external access to your nodes you can set `externa
 ```yaml
 name: no-ext-access
 mgmt:
-  external-access: false # (1)
+  external-access: false #(1)!
 topology:
 # your regular topology definition
 ```
 
-1.  When set to `false`, containerlab will not touch iptables rules. On most docker installations this will result in restricted external access.
+1. When set to `false`, containerlab will not touch iptables rules. On most docker installations this will result in restricted external access.
 
-???error "'missing DOCKER-USER iptables chain' error"
-    Containerlab will throw an error "missing DOCKER-USER iptables chain" when this chain is not found. This error is typically caused by two factors
+///details | Errors and warnings
+External access feature requires nftables kernel API to be present. Kernels newer than v4 typically have this API enabled by default. To understand which API is in use one can issue the following command:
 
-    1. Old docker version installed. Typically seen on Centos systems. Minimum required docker version is 17.06.
-    2. Docker is installed incorrectly. It is recommended to follow the [official installation procedures](https://docs.docker.com/engine/install/) by selecting "Installation per distro" menu option.
+```bash
+iptables -V
+iptables v1.8.5 (nf_tables)
+```
 
-    When docker is correctly installed, additional iptables chains will become available and the error will not appear.
+If the outputs contains `nf_tables` you are all set. If it contains `legacy` or doesn't say anything about `nf_tables` then nf_tables API is not available and containerlab will not be able to setup external access. You will have to enable it manually (or better yet - upgrade the kernel).  
+Older distros, like Centos 7, are known to use the legacy iptables backend and therefore will emit a warning when containerlab will attempt to launch a lab. The warning will not prevent the lab from starting and running, but you will need to setup iptables rules manually if you want your nodes to be accessible from the outside of your containerlab host.
+
+Containerlab will throw an error "missing DOCKER-USER iptables chain" when this chain is not found. This error is typically caused by two factors
+
+1. Old docker version installed. Typically seen on Centos systems. Minimum required docker version is 17.06.
+2. Docker is installed incorrectly. It is recommended to follow the [official installation procedures](https://docs.docker.com/engine/install/) by selecting "Installation per distro" menu option.
+
+When docker is correctly installed, additional iptables chains will become available and the error will not appear.
+///
 
 ### connection details
+
 When containerlab needs to create the management network, it asks the docker daemon to do this. Docker will fulfill the request and will create a network with the underlying linux bridge interface backing it. The bridge interface name is generated by the docker daemon, but it is easy to find it:
 
 ```bash
@@ -258,25 +298,38 @@ d2169a14e334        clab                bridge              local
 ❯ docker network inspect clab -f {{.ID}} | head -c 12
 d2169a14e334
 
-# now the name is known and its easy to show bridge state
+# now the name is known and it's easy to show bridge state
 ❯ brctl show br-d2169a14e334
-bridge name	        bridge id		    STP enabled	  interfaces
-br-d2169a14e334		8000.0242fe382b74	no		      vetha57b950
-							                          vethe9da10a
+bridge name         bridge id      STP enabled   interfaces
+br-d2169a14e334  8000.0242fe382b74 no        vetha57b950
+                                 vethe9da10a
 ```
 
 As explained in the beginning of this article, containers will connect to this docker network. This connection is carried out by the `veth` devices created and attached with one end to bridge interface in the lab host and the other end in the container namespace. This is illustrated by the bridge output above and the diagram at the beginning the of the article.
 
 ## Point-to-point links
+
 Management network is used to provide management access to the NOS containers, it does not carry control or dataplane traffic. In containerlab we create additional point-to-point links between the containers to provide the datapath between the lab nodes.
 
 <div class="mxgraph" style="max-width:100%;border:1px solid transparent;margin:0 auto; display:block;" data-mxgraph="{&quot;page&quot;:11,&quot;zoom&quot;:1.5,&quot;highlight&quot;:&quot;#0000ff&quot;,&quot;nav&quot;:true,&quot;check-visible-state&quot;:true,&quot;resize&quot;:true,&quot;url&quot;:&quot;https://raw.githubusercontent.com/srl-labs/containerlab/diagrams/containerlab.drawio&quot;}"></div>
 
 The above diagram shows how links are created in the topology definition file. In this example, the datapath consists of the two virtual point-to-point wires between SR Linux and cEOS containers. These links are created on-demand by containerlab itself.
 
-The p2p links are provided by the `veth` device pairs where each end of the `veth` pair is attached to a respective container. The MTU on these veth links is set to 9500, so a regular 9212 MTU on the network links shouldn't be a problem.
+The p2p links are typically provided by the `veth` device pairs where each end of the `veth` pair is attached to a respective container.
 
-### host links
+### Link MTU
+
+The MTU on the veth links is set by default to 9500B, so a regular jumbo frame shouldn't traverse the links without problems. If you need to change the MTU, you can do so by setting the `mtu` property in the link definition:
+
+```yaml
+topology:
+  links:
+    - endpoints: ["router2:eth2", "router3:eth1"]
+      mtu: 1500
+```
+
+### Host links
+
 It is also possible to interconnect container' data interface not with other container or add it to a [bridge](kinds/bridge.md), but to attach it to a host's root namespace. This is, for example, needed to create a L2 connectivity between containerlab nodes running on different VMs (aka multi-node labs).
 
 This "host-connectivity" is achieved by using a reserved node name - `host` - referenced in the endpoints section. Consider the following example where an SR Linux container has its only data interface connected to a hosts root namespace via veth interface:
@@ -287,7 +340,7 @@ name: host
 topology:
   nodes:
     srl:
-      kind: srl
+      kind: nokia_srlinux
       image: ghcr.io/nokia/srlinux
       startup-config: test-srl-config.json
   links:
@@ -304,6 +357,7 @@ ip link
 ```
 
 ### Additional connections to management network
+
 By default every lab node will be connected to the docker network named `clab` which acts as a management network for the nodes.
 
 In addition to that mandatory connection, users can attach additional interfaces to this management network. This might be needed, for example, when data interface of a node needs to talk to the nodes on the management network.
@@ -315,7 +369,7 @@ name: mgmt
 topology:
   nodes:
     n1:
-      kind: srl
+      kind: nokia_srlinux
       image: ghcr.io/nokia/srlinux
   links:
     - endpoints:
@@ -324,7 +378,7 @@ topology:
 
 ```
 
-In the above example the node `n1` connects with its `e1-1` interface to the management network. This is done by specifying the endpoint with a reserved name `mgmt-net` and defining the name of the interface that should be used in that bridge (`nq-e1-1`).
+In the above example the node `n1` connects with its `e1-1` interface to the management network. This is done by specifying the endpoint with a reserved name `mgmt-net` and defining the name of the interface that should be used in that bridge (`n1-e1-1`).
 
 By specifying `mgmt-net` name of the node in the endpoint definition we tell containerlab to find out which bridge is used by the management network of our lab and use this bridge as the attachment point for our veth pair.
 
@@ -332,7 +386,89 @@ This is best illustrated with the following diagram:
 
 <div class="mxgraph" style="max-width:100%;border:1px solid transparent;margin:0 auto; display:block;" data-mxgraph="{&quot;page&quot;:14,&quot;zoom&quot;:1.5,&quot;highlight&quot;:&quot;#0000ff&quot;,&quot;nav&quot;:true,&quot;check-visible-state&quot;:true,&quot;resize&quot;:true,&quot;url&quot;:&quot;https://raw.githubusercontent.com/srl-labs/containerlab/diagrams/containerlab.drawio&quot;}"></div>
 
+### MACVLAN links
+
+In addition to the `veth` links, containerlab supports `macvlan` links. This type of links is useful when users want to connect containers to the host interface/network directly. This is achieved by defining a link endpoints which has one end defined with a special `macvlan:<host-iface-name>` signature.
+
+Consider the following example where we connect a Linux container `l1` to the hosts `enp0s3` interface:
+
+```yaml
+name: macvlan
+
+topology:
+  nodes:
+    l1:
+      kind: linux
+      image: alpine:3
+
+  links:
+    - endpoints: ["l1:eth1", "macvlan:enp0s3"]
+```
+
+This topology will result in l1 node having its `eth1` interface connected to the `enp0s3` interface of the host as per the diagram below:
+
+<div class="mxgraph" style="max-width:100%;border:1px solid transparent;margin:0 auto; display:block;" data-mxgraph='{"page":16,"zoom":1.5,"highlight":"#0000ff","nav":true,"check-visible-state":true,"resize":true,"url":"https://raw.githubusercontent.com/srl-labs/containerlab/diagrams/containerlab.drawio"}'></div>
+
+Containerlab will create a macvlan interface in the bridge mode, attach it to the parent `enp0s3` interface and then move it to the container's net namespace and name it `eth1`, as instructed by the endpoint definition in the topology.
+
+Users then can configure the `eth1` interface inside the container as they would do with any other interface. As per the diagram above, we configure `eth1` interface with ipv4 address from the host's `enp0s3` interface subnet:
+
+```bash title="entering the container's shell"
+docker exec -it clab-macvlan-l1 ash
+```
+
+```bash
+# adding v4 address to the eth1 interface
+ip address add 10.0.0.111/24 dev eth1
+```
+
+Once v4 address is assigned to the macvlan inteface, we can test the connectivity by pinging default gateway of the host:
+
+```bash
+❯ ping 10.0.0.1
+PING 10.0.0.1 (10.0.0.1): 56 data bytes
+64 bytes from 10.0.0.1: seq=0 ttl=64 time=0.545 ms
+64 bytes from 10.0.0.1: seq=1 ttl=64 time=0.243 ms
+```
+
+When capturing packets from the hosts's `enp0s3` interface we can see that the ping packets are coming through it using the mac address assigned to the macvlan inteface:
+
+```bash
+❯ tcpdump -nnei enp0s3 icmp
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on enp0s3, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+22:35:02.430901 aa:c1:ab:72:b3:fe > fa:16:3e:af:03:05, ethertype IPv4 (0x0800), length 98: 10.0.0.111 > 10.0.0.1: ICMP echo request, id 24, seq 4, length 64
+22:35:02.431017 fa:16:3e:af:03:05 > aa:c1:ab:72:b3:fe, ethertype IPv4 (0x0800), length 98: 10.0.0.1 > 10.0.0.111: ICMP echo reply, id 24, seq 4, length 64
+```
+
+## Manual control over the management network
+
+By default containerlab creates a docker network named `clab` and attaches all the nodes to this network. This network is used as a management network for the nodes and is managed by the container runtime such as docker or podman.
+
+Container runtime is responsible for creating the `eth0` interface inside the container and attaching it to the `clab` network. This interface is used by the container to communicate with the management network. For that reason the links users create in the topology's `links` section typically do not include the `eth0` interface.
+
+However, there might be cases when users want to take control over `eth0` interface management. For example, they might want to connect `eth0` to a different network or even another container's interface. To achieve that, users can instruct container runtime to not manage the `eth0` interface and leave it to the user, using [`network-mode: none`](nodes.md#network-mode) setting.
+
+Consider the following example, where node1's management interface `eth0` is provided in the `links` section and connects to node2's `eth1` interface:
+
+```yaml
+name: e0
+
+topology:
+  nodes:
+    node1:
+      kind: linux
+      image: alpine:3
+      network-mode: none
+    node2:
+      kind: linux
+      image: alpine:3
+  links:
+    - endpoints: ["node1:eth0", "node2:eth1"]
+```
+
 ## DNS
+
 When containerlab finishes the nodes deployment, it also creates static DNS entries inside the `/etc/hosts` file so that users can access the nodes using their DNS names.
 
 The DNS entries are created for each node's IPv4/6 address, and follow the pattern - `clab-$labName-$nodeName`.
@@ -347,3 +483,5 @@ For a lab named `demo` with two nodes named `l1` and `l2` containerlab will crea
 2001:172:20:20::3       clab-demo-l2
 ###### CLAB-demo-END ######
 ```
+
+[^1]: See <https://github.com/srl-labs/containerlab/issues/1302#issuecomment-1533796941> for details and links to the original discussion.

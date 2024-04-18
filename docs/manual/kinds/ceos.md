@@ -59,7 +59,7 @@ Arista cEOS node launched with containerlab can be managed via the following int
 
 ceos container uses the following mapping for its linux interfaces:
 
-* `eth0` - management interface connected to the containerlab management network
+* `eth0`[^5] - management interface connected to the containerlab management network
 * `eth1` - first data interface
 
 When containerlab launches ceos node, it will set IPv4/6 addresses as assigned by docker to the `eth0` interface and ceos node will boot with that addresses configured. Data interfaces `eth1+` need to be configured with IP addressing manually.
@@ -168,7 +168,7 @@ With the following topology file, containerlab is instructed to take a `mymappin
 
     This way the bind is set only once, and nodes of `ceos` kind will have these binds applied.
 
-## Additional interface naming considerations
+### Additional interface naming considerations
 
 While many users will be fine with the default ceos naming of `eth`, some ceos users may find that they need to name their interfaces `et`. Interfaces named `et` provide consistency with the underlying interface mappings within ceos. This enables the correct operation of commands/features which depend on `et` format interface naming.
 
@@ -182,11 +182,33 @@ topology:
     env:
       INTFTYPE: et
   nodes:
-  { ... snipped misc. node definition for brevity ... }
+  # --snip--
   links:
     - endpoints: ["ceos_rtr1:et1", "ceos_rtr2:et1"]
     - endpoints: ["ceos_rtr1:et2", "ceos_rtr3:et1"]
 ```
+
+If the only purpose of renaming the interfaces is to add breakouts ("/1", etc.) to the interface naming to match the future physical setup, it is possible to use underscores ("_") in the interface names.
+
+```yaml
+name: ceos
+
+topology:
+  nodes:
+    ceos1:
+      kind: ceos
+      image: ceos:4.28.0F
+    ceos2: 
+      kind: ceos
+      image: ceos:4.28.0F
+links:
+    - endpoints: ["ceos1:eth1_1", "ceos2:eth2_1_1"]
+```
+
+This topology will be equivalent to `ceos1:Ethernet1/1` connected to `ceos2:Ethernet2/1/1`.
+
+!!!note
+    This feature can not be used together with interface mapping. If the interface mapping is in use, all names must be redefined in the map and the underscore naming option will not work. Also, it's only possible to rename Ethernet interfaces this way, not management ports.
 
 ## Features and options
 
@@ -287,7 +309,7 @@ In addition to cli commands such as `write memory` user can take advantage of th
 
 ## Container configuration
 
-To start an Arista cEOS node containerlab uses the configuration instructions described in Arista Forums[^1]. The exact parameters are outlined below.
+To start an Arista cEOS node containerlab uses the following configuration:
 
 === "Startup command"
     `/sbin/init systemd.setenv=INTFTYPE=eth systemd.setenv=ETBA=1 systemd.setenv=SKIP_ZEROTOUCH_BARRIER_IN_SYSDBINIT=1 systemd.setenv=CEOS=1 systemd.setenv=EOS_PLATFORM=ceoslab systemd.setenv=container=docker systemd.setenv=MAPETH0=1 systemd.setenv=MGMT_INTF=eth0`
@@ -396,7 +418,35 @@ sudo iptables -P INPUT ACCEPT
 sudo ip6tables -P INPUT ACCEPT
 ```
 
-[^1]: https://eos.arista.com/ceos-lab-topo/
 [^2]: feel free to omit the IP addressing for Management interface, as it will be configured by containerlab when ceos node boots.
 [^3]: if startup config needs to be enforced, either deploy a lab with `--reconfigure` flag, or use [`enforce-startup-config`](../nodes.md#enforce-startup-config) setting.
 [^4]: for example, Ubuntu 21.04 comes with cgroup v2 [by default](https://askubuntu.com/a/1369957).
+[^5]: interface name can also be `et` instead of `eth`.
+
+### Scale
+
+From version 4.28.0F, the ceos-lab image supports up to 50 nodes per host. On previous releases and/or with higher scale there might be issues cores inside the ceos-lab nodes and erros like `Error: Too many open files`.
+
+Example solution for 60 ceos-lab nodes:
+
+1. On the host run:
+
+```
+sudo sh -c 'echo "fs.inotify.max_user_instances = 75000" > /etc/sysctl.d/99-zceoslab.conf'
+sudo sysctl --load /etc/sysctl.d/99-zceoslab.conf
+```
+
+where 75000 is `60 (# of nodes) * 1250`.
+
+2. Bind newly created file into the ceos-lab containers:
+
+```
+...
+topology:
+  kinds:
+    ceos:
+      ...
+      binds:
+        - /etc/sysctl.d/99-zceoslab.conf:/etc/sysctl.d/99-zceoslab.conf:ro
+...
+```

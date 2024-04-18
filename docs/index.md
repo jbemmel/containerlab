@@ -6,6 +6,8 @@ hide:
 
 [![github release](https://img.shields.io/github/release/srl-labs/containerlab.svg?style=flat-square&color=00c9ff&labelColor=bec8d2)](https://github.com/srl-labs/containerlab/releases/)
 [![Github all releases](https://img.shields.io/github/downloads/srl-labs/containerlab/total.svg?style=flat-square&color=00c9ff&labelColor=bec8d2)](https://github.com/srl-labs/containerlab/releases/)
+[![Twitter](https://img.shields.io/badge/follow-%40go_containerlab-1DA1F2?logo=twitter&style=flat-square&color=00c9ff&labelColor=bec8d2)](https://twitter.com/go_containerlab)
+[![Discord](https://img.shields.io/discord/860500297297821756?style=flat-square&label=discord&logo=discord&color=00c9ff&labelColor=bec8d2)](https://discord.gg/vAyddtaEV9)
 
 ---
 
@@ -21,24 +23,35 @@ Containerlab focuses on the containerized Network Operating Systems which are ty
 
 * [Nokia SR Linux](manual/kinds/srl.md)
 * [Arista cEOS](manual/kinds/ceos.md)
+* [Cisco XRd](manual/kinds/xrd.md)
 * [Azure SONiC](manual/kinds/sonic-vs.md)
 * [Juniper cRPD](manual/kinds/crpd.md)
 * [Cumulus VX](manual/kinds/cvx.md)
 * [Keysight IXIA-C](manual/kinds/keysight_ixia-c-one.md)
+* [RARE/freeRtr](manual/kinds/rare-freertr.md)
 
 In addition to native containerized NOSes, containerlab can launch traditional virtual machine based routers using [vrnetlab or boxen integration](manual/vrnetlab.md):
 
 * [Nokia virtual SR OS (vSim/VSR)](manual/kinds/vr-sros.md)
 * [Juniper vMX](manual/kinds/vr-vmx.md)
 * [Juniper vQFX](manual/kinds/vr-vqfx.md)
+* [Juniper vSRX](manual/kinds/vr-vsrx.md)
+* [Juniper vJunos Switch](manual/kinds/vr-vjunosswitch.md)
+* [Juniper vJunos Evolved](manual/kinds/vr-vjunosevolved.md)
 * [Cisco IOS XRv9k](manual/kinds/vr-xrv9k.md)
 * [Cisco Nexus 9000v](manual/kinds/vr-n9kv.md)
-* [Dell FTOS10v](manual/kinds/vr-ftosv.md)
+* [Cisco c8000v](manual/kinds/vr-c8000v.md)
 * [Cisco CSR 1000v](manual/kinds/vr-csr.md)
+* [Cisco FTDv](manual/kinds/vr-ftdv.md)
+* [Dell FTOS10v](manual/kinds/vr-ftosv.md)
 * [Arista vEOS](manual/kinds/vr-veos.md)
 * [Palo Alto PAN](manual/kinds/vr-pan.md)
 * [IPInfusion OcNOS](manual/kinds/ipinfusion-ocnos.md)
 * [Check Point Cloudguard](manual/kinds/checkpoint_cloudguard.md)
+* [Fortinet Fortigate](manual/kinds/fortinet_fortigate.md)
+* [Aruba AOS-CX](manual/kinds/vr-aoscx.md)
+* [OpenBSD](manual/kinds/openbsd.md)
+* [FreeBSD](manual/kinds/freebsd.md)
 
 And, of course, containerlab is perfectly capable of wiring up arbitrary linux containers which can host your network applications, virtual functions or simply be a test client. With all that, containerlab provides a single IaaC interface to manage labs which can span all the needed variants of nodes:
 
@@ -81,12 +94,12 @@ This short clip briefly demonstrates containerlab features and explains its purp
 ## Use cases
 
 * **Labs and demos**  
-    Containerlab was meant to be a tool for provisioning networking labs built with containers. It is free, open and ubiquitous. No software apart from Docker is required!  
-    As with any lab environment it allows the users to validate features, topologies, perform interop testing, datapath testing, etc.  
+    Containerlab was meant to be a tool for provisioning networking labs built with containers. It is free, open and ubiquitous. No software apart from Docker is required!
+    As with any lab environment it allows the users to validate features, topologies, perform interop testing, datapath testing, etc.
     It is also a perfect companion for your next demo. Deploy the lab fast, with all its configuration stored as a code -> destroy when done. Easily and [securely share lab access](manual/published-ports.md) if needed.
 * **Testing and CI**  
     Because of the containerlab's single-binary packaging and code-based lab definition files, it was never that easy to spin up a test bed for CI. Gitlab CI, Github Actions and virtually any CI system will be able to spin up containerlab topologies in a single simple command.
-* **Telemetry validation**
+* **Telemetry validation**  
     Coupling modern telemetry stacks with containerlab labs make a perfect fit for Telemetry use cases validation. Spin up a lab with containerized network functions with a telemetry on the side, and run comprehensive telemetry use cases.
 
 ## Join us
