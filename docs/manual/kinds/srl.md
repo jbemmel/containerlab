@@ -44,7 +44,7 @@ using the best in class [gnmic](https://gnmic.kmrd.dev) gNMI client as an exampl
 
 ```bash
 gnmic -a <container-name/node-mgmt-address> --skip-verify \
--u admin -p admin \
+-u admin -p "NokiaSrl1!" \
 -e json_ietf \
 get --path /system/name/host-name
 ```
@@ -327,6 +327,19 @@ IP Address:172.20.20.3, IP Address:2001:172:20:20:0:0:0:3
 
 Nokia SR Linux nodes support setting of [SANs](../nodes.md#subject-alternative-names-san).
 
+### gRPC server
+
+Starting with SR Linux 24.3.1, the gRPC server config block is used to configure gRPC-based services such as gNMI, gNOI, gRIBI and P4RT. The factory configuration includes the `mgmt` gRPC server block to which containerlab adds all those services and:
+
+* generated TLS profile
+* unix-socket access for gRPC services
+* increased rate limit
+* trace options
+
+These additions are meant to make all gRPC services available to the user out of the box with the enabled tracing and a custom TLS profile.
+
+Besides augmenting the factory-provided `mgmt` gRPC server block, containerlab also adds a new `insecure-mgmt` gRPC server that provides the same services as the `mgmt` server but without TLS. This server runs on port 57401 and is meant to be used for testing purposes as well as for local gNMI clients running as part of the NDK apps or local Event Handler scripts.
+
 ### License
 
 SR Linux container can run without a license emulating the datacenter types (7220 IXR) :partying_face:.  
@@ -424,6 +437,15 @@ A:srl# info system dns
 ```
 
 If you wish to turn off the automatic DNS provisioning, set the `servers` list to an empty value in the [node configuration](../nodes.md#dns).
+
+### ACL configuration
+
+Starting with SR Linux 24.3.1 release, containerlab adds CPM filter rules to the default factory configuration to allow the following traffic:
+
+* HTTP access over port 80 for v4 and v6
+* Telnet access over port 23 for v4 and v6
+
+These protocols were removed from the default factory configuration in SR Linux 24.3.1 as a security hardening measure, but they are valuable for lab environments, hence containerlab adds them back.
 
 ## Host Requirements
 
