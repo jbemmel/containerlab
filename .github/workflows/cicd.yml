@@ -223,7 +223,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull ceos image
-        run: docker pull ghcr.io/srl-labs/ceos:4.28.0F && docker tag ghcr.io/srl-labs/ceos:4.28.0F ceos:4.28.0F
+        run: docker pull ghcr.io/srl-labs/ceos:4.32.0F && docker tag ghcr.io/srl-labs/ceos:4.32.0F ceos:4.32.0F
       - name: Run ceos tests
         run: |
           bash ./tests/rf-run.sh ${{ matrix.runtime }} ./tests/03-basic-ceos
@@ -474,6 +474,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - run: docker run -v $(pwd):/docs --user $(id -u):$(id -g) --entrypoint mkdocs ghcr.io/srl-labs/mkdocs-material-insiders:$MKDOCS_INS_VER gh-deploy --force --strict
+
+  build-devcontainer:
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '-') != true
+    needs: build-and-release
+    uses: ./.github/workflows/build-devcontainer.yml
 
   # update docs allows to make the docs changes outside of the release cycle
   # it skips the code build/release and proceeds with docs publishing

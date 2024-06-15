@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/srl-labs/containerlab/clab"
 	"github.com/srl-labs/containerlab/links"
+	"github.com/srl-labs/containerlab/nodes/srl"
 	"github.com/srl-labs/containerlab/types"
 	"gopkg.in/yaml.v2"
 )
@@ -39,12 +40,12 @@ var interfaceFormat = map[string]string{
 
 var supportedKinds = []string{
 	"srl", "ceos", "linux", "bridge", "sonic-vs", "crpd", "vr-sros", "vr-vmx", "vr-vsrx",
-	"vr-vqfx", "vr-vjunosswitch", "vr-xrv9k", "vr-veos", "xrd", "rare", "openbsd", "cisco_ftdv",
-	"freebsd",
+	"vr-vqfx", "juniper_vjunosevolved", "juniper_vjunosrouter", "juniper_vjunosswitch", "vr-xrv9k", "vr-veos",
+	"xrd", "rare", "openbsd", "cisco_ftdv", "freebsd",
 }
 
 const (
-	defaultSRLType     = "ixrd2"
+	defaultSRLType     = srl.SRLinuxDefaultType
 	defaultNodePrefix  = "node"
 	defaultGroupPrefix = "tier"
 )
