@@ -11,6 +11,7 @@ import (
 	"github.com/distribution/reference"
 	"github.com/docker/docker/api/types/registry"
 	log "github.com/sirupsen/logrus"
+	"github.com/srl-labs/containerlab/utils"
 )
 
 const (
@@ -44,27 +45,20 @@ func getImageDomainName(imageName string) string {
 	return imageDomainName
 }
 
-func getDockerConfigPath(configPath string) (string, error) {
-	var err error
+func getDockerConfigPath(configPath string) string {
 	if configPath == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-
-		configPath = filepath.Join(homeDir, dockerDefaultConfigDir, dockerDefaultConfigFile)
+		configPath = utils.ResolvePath(filepath.Join("~", dockerDefaultConfigDir, dockerDefaultConfigFile), "")
 	}
 
-	return configPath, err
+	return configPath
 }
 
+// GetDockerConfig reads the docker config file by the configPath and returns the DockerConfig struct
+// with parts of the docker config.
 func GetDockerConfig(configPath string) (*DockerConfig, error) {
 	var dockerConfig DockerConfig
 
-	dockerConfigPath, err := getDockerConfigPath(configPath)
-	if err != nil {
-		return nil, err
-	}
+	dockerConfigPath := getDockerConfigPath(configPath)
 
 	file, err := os.ReadFile(dockerConfigPath)
 	if err != nil {
@@ -95,12 +89,12 @@ func GetDockerAuth(dockerConfig *DockerConfig, imageName string) (string, error)
 		return "", nil
 	}
 
-	decodedAuth, err := base64.URLEncoding.DecodeString(auth)
+	decodedAuth, err := base64.StdEncoding.DecodeString(auth)
 	if err != nil {
 		return "", err
 	}
 
-	decodedAuthSplit := strings.Split(string(decodedAuth), authStringSep)
+	decodedAuthSplit := strings.SplitN(string(decodedAuth), authStringSep, authStringLength)
 
 	if len(decodedAuthSplit) != authStringLength {
 		return "", errors.New("unexpected auth string")

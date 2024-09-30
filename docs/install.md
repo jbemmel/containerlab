@@ -20,21 +20,42 @@ The easiest way to get started with containerlab is to use the [quick setup scri
 * Containerlab (using the package repository)
 * [`gh` CLI tool](https://cli.github.com/)
 
-The script supports the following OSes:
+The script officially supports the following OSes:
 
 * Ubuntu 20.04, 22.04, 23.10
 * Debian 11, 12
+* Red Hat Enterprise Linux 9
+* CentOS Stream 9
+* Fedora Server 40 (should work on other variants of Fedora)
+* Rocky Linux 9.3, 8.8 (should work on any 9.x and 8.x release)
 
 To install all components at once, run the following command on any of the supported OSes:
 
 ```bash
-curl -sL https://containerlab.dev/setup | sudo bash -s "all"
+curl -sL https://containerlab.dev/setup | sudo -E bash -s "all"
 ```
+
+/// note
+To complete installation please execute `newgrp docker` or logout and log back in.
+///
 
 To install an individual component, specify the function name as an argument to the script. For example, to install only `docker`:
 
 ```bash
-curl -sL https://containerlab.dev/setup | sudo bash -s "install-docker"
+curl -sL https://containerlab.dev/setup | sudo -E bash -s "install-docker"
+```
+
+If you don't have your own shell configuration and want to have a slightly better bash PS1 prompt you can also run this script:
+
+```bash
+curl -sL https://containerlab.dev/setup | sudo -E bash -s "setup-bash-prompt"
+```
+
+Log out and log back in to see the new two-line prompt in action:
+
+```bash
+[*]─[clab]─[~]
+└──>
 ```
 
 ## Install script
@@ -49,11 +70,11 @@ Other systems can follow the [manual installation](#manual-installation) procedu
 /// tab | Latest release
 
 Download and install the latest release (may require `sudo`):
-
-```bash
+<!-- --8<-- [start:install-script-cmd] -->
+```{.bash .no-select}
 bash -c "$(curl -sL https://get.containerlab.dev)"
 ```
-
+<!-- --8<-- [end:install-script-cmd] -->
 ///
 
 /// tab | Specific version

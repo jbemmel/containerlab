@@ -19,11 +19,6 @@ import (
 	"github.com/srl-labs/containerlab/types"
 )
 
-const (
-	defaultGraphTemplatePath = "/etc/containerlab/templates/graph/nextui/nextui.html"
-	defaultStaticPath        = "/etc/containerlab/templates/graph/nextui/static"
-)
-
 var (
 	srv              string
 	tmpl             string
@@ -33,6 +28,7 @@ var (
 	mermaidDirection string
 	drawio           bool
 	drawioVersion    string
+	drawioArgs       []string
 	staticDir        string
 )
 
@@ -79,7 +75,7 @@ func graphFn(_ *cobra.Command, _ []string) error {
 	}
 
 	if drawio {
-		return c.GenerateDrawioDiagram(drawioVersion)
+		return c.GenerateDrawioDiagram(drawioVersion, drawioArgs)
 	}
 
 	gtopo := clab.GraphTopo{
@@ -119,11 +115,14 @@ func graphFn(_ *cobra.Command, _ []string) error {
 
 		eps := l.GetEndpoints()
 
+		ifaceDisplayNameA := eps[0].GetIfaceDisplayName()
+		ifaceDisplayNameB := eps[1].GetIfaceDisplayName()
+
 		gtopo.Links = append(gtopo.Links, clab.Link{
 			Source:         eps[0].GetNode().GetShortName(),
-			SourceEndpoint: eps[0].GetIfaceName(),
+			SourceEndpoint: ifaceDisplayNameA,
 			Target:         eps[1].GetNode().GetShortName(),
-			TargetEndpoint: eps[1].GetIfaceName(),
+			TargetEndpoint: ifaceDisplayNameB,
 		})
 	}
 
@@ -150,12 +149,14 @@ func init() {
 	graphCmd.Flags().BoolVarP(&dot, "dot", "", false, "generate dot file")
 	graphCmd.Flags().BoolVarP(&mermaid, "mermaid", "", false, "print mermaid flowchart to stdout")
 	graphCmd.Flags().StringVarP(&mermaidDirection, "mermaid-direction", "", "TD", "specify direction of mermaid dirgram")
+	graphCmd.Flags().StringSliceVar(&drawioArgs, "drawio-args", []string{},
+		"Additional flags to pass to the drawio diagram generation tool (can be specified multiple times)")
 	graphCmd.Flags().BoolVarP(&drawio, "drawio", "", false, "generate drawio diagram file")
 	graphCmd.Flags().StringVarP(&drawioVersion, "drawio-version", "", "latest",
 		"version of the clab-io-draw container to use for generating drawio diagram file")
-	graphCmd.Flags().StringVarP(&tmpl, "template", "", defaultGraphTemplatePath,
+	graphCmd.Flags().StringVarP(&tmpl, "template", "", "",
 		"Go html template used to generate the graph")
-	graphCmd.Flags().StringVarP(&staticDir, "static-dir", "", defaultStaticPath,
+	graphCmd.Flags().StringVarP(&staticDir, "static-dir", "", "",
 		"Serve static files from the specified directory")
 	graphCmd.Flags().StringSliceVarP(&nodeFilter, "node-filter", "", []string{},
 		"comma separated list of nodes to include")
