@@ -15,7 +15,7 @@
                 },
                 "image-pull-policy": {
                     "type": "string",
-                    "description": "policy for pulling the referenced cotnainer image",
+                    "description": "policy for pulling the referenced container image",
                     "markdownDescription": "container [image-pull-policy](https://containerlab.dev/manual/nodes/#image-pull-policy) to use for this node",
                     "enum": [
                         "always",
@@ -24,6 +24,21 @@
                         "Never",
                         "ifnotpresent",
                         "IfNotPresent"
+                    ]
+                },
+                "restart-policy": {
+                    "type": "string",
+                    "description": "restart policy for the referenced container image",
+                    "markdownDescription": "container [restart-policy](https://containerlab.dev/manual/nodes/#restart-policy) to use for this node",
+                    "enum": [
+                        "no",
+                        "No",
+                        "on-failure",
+                        "On-failure",
+                        "Always",
+                        "always",
+                        "unless-stopped",
+                        "Unless-stopped"
                     ]
                 },
                 "kind": {
@@ -97,8 +112,10 @@
                         "cisco_c8000",
                         "cisco_c8000v",
                         "cisco_cat9kv",
+                        "cisco_iol",
                         "cvx",
                         "cumulus_cvx",
+                        "huawei_vrp",
                         "openbsd",
                         "freebsd",
                         "generic_vm",
@@ -316,6 +333,15 @@
                 "healthcheck": {
                     "type": "object",
                     "$ref": "#/definitions/healthcheck-config"
+                },
+                "aliases": {
+                    "type": "array",
+                    "description": "list of additional network aliases for the node",
+                    "markdownDescription": "list of [aliases](https://containerlab.dev/manual/nodes/#aliases) for the node",
+                    "items": {
+                        "type": "string"
+                    },
+                    "uniqueItems": true
                 }
             },
             "allOf": [
@@ -795,8 +821,8 @@
                     "pattern": "(^.+\/[0-9]{1,2}$)|(auto)"
                 },
                 "ipv6-subnet": {
-                    "description": "IPv6 subnet to use for the custom management network. e.g. 2001:172:100:100::/64",
-                    "markdownDescription": "[IPv6 subnet](https://containerlab.dev/manual/network/#user-defined-addresses) to be used for the custom management network. e.g. 2001:172:100:100::/64",
+                    "description": "IPv6 subnet to use for the custom management network. e.g. 3fff:172:100:100::/64",
+                    "markdownDescription": "[IPv6 subnet](https://containerlab.dev/manual/network/#user-defined-addresses) to be used for the custom management network. e.g. 3fff:172:100:100::/64",
                     "type": "string",
                     "pattern": "(^.+\/[0-9]{1,3}$)|(auto)"
                 },
@@ -819,8 +845,8 @@
                     "pattern": "^.+\/[0-9]{1,2}$"
                 },
                 "ipv6-range": {
-                    "description": "IPv6 range out of the ipv6-subnet to use for the custom management network. e.g. 2001:172:100:100:8000::/65",
-                    "markdownDescription": "[IPv6 range](https://containerlab.dev/manual/network/#ip-range) out of the ipv6-subnet to use for the custom management network. e.g. 2001:172:100:100:8000::/65",
+                    "description": "IPv6 range out of the ipv6-subnet to use for the custom management network. e.g. 3fff:172:100:100:8000::/65",
+                    "markdownDescription": "[IPv6 range](https://containerlab.dev/manual/network/#ip-range) out of the ipv6-subnet to use for the custom management network. e.g. 3fff:172:100:100:8000::/65",
                     "type": "string",
                     "pattern": "^((:|[0-9a-fA-F]{0,4}):)([0-9a-fA-F]{0,4}:){0,5}((([0-9a-fA-F]{0,4}:)?(:|[0-9a-fA-F]{0,4}))|(((25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])))(%[\\p{N}\\p{L}]+)?$"
                 },
@@ -958,6 +984,9 @@
                         "cisco_ftdv": {
                             "$ref": "#/definitions/node-config"
                         },
+                        "cisco_iol": {
+                            "$ref": "#/definitions/node-config"
+                        },
                         "linux": {
                             "$ref": "#/definitions/node-config"
                         },
@@ -1007,6 +1036,9 @@
                             "$ref": "#/definitions/node-config"
                         },
                         "freebsd": {
+                            "$ref": "#/definitions/node-config"
+                        },
+                        "huawei_vrp": {
                             "$ref": "#/definitions/node-config"
                         },
                         "generic_vm": {

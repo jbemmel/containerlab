@@ -504,8 +504,19 @@ func (d *DockerRuntime) CreateContainer(ctx context.Context, node *types.NodeCon
 
 	// regular linux containers may benefit from automatic restart on failure
 	// note, that veth pairs added to this container (outside of eth0) will be lost on restart
-	if node.Kind == "linux" && !node.AutoRemove {
-		containerHostConfig.RestartPolicy.Name = "on-failure"
+	if !node.AutoRemove && node.RestartPolicy != "" {
+		var rp container.RestartPolicyMode
+		switch node.RestartPolicy {
+		case "no":
+			rp = container.RestartPolicyDisabled
+		case "always":
+			rp = container.RestartPolicyAlways
+		case "on-failure":
+			rp = container.RestartPolicyOnFailure
+		case "unless-stopped":
+			rp = container.RestartPolicyUnlessStopped
+		}
+		containerHostConfig.RestartPolicy.Name = rp
 	}
 
 	cont, err := d.Client.ContainerCreate(
@@ -649,7 +660,6 @@ func (d *DockerRuntime) ListContainers(ctx context.Context, gfilters []*types.Ge
 		nr, err = d.Client.NetworkList(nctx, networkapi.ListOptions{
 			Filters: f,
 		})
-
 		if err != nil {
 			return nil, err
 		}
@@ -991,6 +1001,7 @@ func (d *DockerRuntime) processNetworkMode(
 					IPv4Address: node.MgmtIPv4Address,
 					IPv6Address: node.MgmtIPv6Address,
 				},
+				Aliases: node.Aliases,
 			},
 		}
 	}

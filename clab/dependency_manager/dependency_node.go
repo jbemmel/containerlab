@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/clab/exec"
 	"github.com/srl-labs/containerlab/nodes"
+	"github.com/srl-labs/containerlab/nodes/host"
 	"github.com/srl-labs/containerlab/types"
 )
 
@@ -61,20 +62,32 @@ func (d *DependencyNode) getStageWG(n types.WaitForStage) *sync.WaitGroup {
 	return d.stageWG[n]
 }
 
-func (d *DependencyNode) getExecs(p types.WaitForStage, t types.CommandType) ([]*exec.ExecCmd, error) {
-	switch p {
+func (d *DependencyNode) getExecs(stage types.WaitForStage, execPhase types.ExecPhase) ([]*types.Exec, error) {
+	var sb types.StageBase
+	switch stage {
 	case types.WaitForCreate:
-		return d.Config().Stages.Create.GetExecCommands(t)
+		sb = d.Config().Stages.Create.StageBase
 	case types.WaitForCreateLinks:
-		return d.Config().Stages.CreateLinks.GetExecCommands(t)
+		sb = d.Config().Stages.CreateLinks.StageBase
 	case types.WaitForConfigure:
-		return d.Config().Stages.Configure.GetExecCommands(t)
+		sb = d.Config().Stages.Configure.StageBase
 	case types.WaitForHealthy:
-		return d.Config().Stages.Healthy.GetExecCommands(t)
+		sb = d.Config().Stages.Healthy.StageBase
 	case types.WaitForExit:
-		return d.Config().Stages.Exit.GetExecCommands(t)
+		sb = d.Config().Stages.Exit.StageBase
+	default:
+		return nil, fmt.Errorf("stage %s unknown", stage)
 	}
-	return nil, fmt.Errorf("stage %s unknown", p)
+
+	var result = []*types.Exec{}
+	for _, x := range sb.Execs {
+		// filter the list of commands for the given phase (on-enter / on-exit)
+		if x.Phase == execPhase {
+			result = append(result, x)
+		}
+	}
+
+	return result, nil
 }
 
 // EnterStage is called by a node that is meant to enter the specified stage.
@@ -83,11 +96,11 @@ func (d *DependencyNode) EnterStage(ctx context.Context, p types.WaitForStage) {
 	log.Debugf("Stage Change: Enter Wait -> %s - %s", d.GetShortName(), p)
 	d.stageWG[p].Wait()
 	log.Debugf("Stage Change: Enter Go -> %s - %s", d.GetShortName(), p)
-	d.runExecs(ctx, types.CommandTypeEnter, p)
+	d.runExecs(ctx, types.CommandExecutionPhaseEnter, p)
 }
 
-func (d *DependencyNode) runExecs(ctx context.Context, ct types.CommandType, p types.WaitForStage) {
-	execs, err := d.getExecs(p, ct)
+func (d *DependencyNode) runExecs(ctx context.Context, execPhase types.ExecPhase, stage types.WaitForStage) {
+	execs, err := d.getExecs(stage, execPhase)
 	if err != nil {
 		log.Errorf("error getting exec commands defined for %s: %v", d.GetShortName(), err)
 	}
@@ -98,15 +111,32 @@ func (d *DependencyNode) runExecs(ctx context.Context, ct types.CommandType, p t
 
 	// exec the commands
 	execResultCollection := exec.NewExecCollection()
-
+	var execResult *exec.ExecResult
+	var hostname string
 	for _, exec := range execs {
-		execResult, err := d.RunExec(ctx, exec)
+
+		execCmd, err := exec.GetExecCmd()
 		if err != nil {
-			log.Errorf("error on exec in node %s for stage %s: %v", d.GetShortName(), p, err)
+			log.Errorf("%s stage %s error parsing command: %s", d.GetShortName(), stage, exec.String())
 		}
-		execResultCollection.Add(d.GetShortName(), execResult)
+
+		switch exec.Target {
+		case types.CommandTargetContainer:
+			execResult, err = d.RunExec(ctx, execCmd)
+			hostname = d.GetShortName()
+		case types.CommandTargetHost:
+			execResult, err = host.RunExec(ctx, execCmd)
+			hostname = fmt.Sprintf("host via %s", d.GetShortName())
+		default:
+			continue
+		}
+		if err != nil {
+			log.Errorf("error on exec in node %s for stage %s: %v", d.GetShortName(), stage, err)
+		}
+		execResultCollection.Add(hostname, execResult)
 	}
 	execResultCollection.Log()
+
 }
 
 // Done is called by a node that has finished all tasks for the provided stage.
@@ -114,8 +144,8 @@ func (d *DependencyNode) runExecs(ctx context.Context, ct types.CommandType, p t
 func (d *DependencyNode) Done(ctx context.Context, p types.WaitForStage) {
 	// iterate through all the dependers, that wait for the specific stage
 	// and reduce the waitgroup
-	d.runExecs(ctx, types.CommandTypeExit, p)
 	log.Debugf("StateChange: Done -> %s - %s", d.GetShortName(), p)
+	d.runExecs(ctx, types.CommandExecutionPhaseExit, p)
 	for _, depender := range d.depender[p] {
 		log.Debugf("StateChange: Node %s unblocking %s", d.GetShortName(), depender.String())
 		depender.SignalDone()

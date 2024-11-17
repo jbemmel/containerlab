@@ -88,6 +88,32 @@ topology:
       image-pull-policy: Always
 ```
 
+### restart-policy
+
+With `restart-policy` a user defines the restart policy of a container as per [docker docs](https://docs.docker.com/engine/containers/start-containers-automatically/).
+
+Valid values are:
+
+- `no` - Don't automatically restart the container.
+- `on-failure` - Restart the container if it exits due to an error, which manifests as a non-zero exit code. The on-failure policy only prompts a restart if the container exits with a failure. It doesn't restart the container if the daemon restarts.
+- `always` - Always restart the container if it stops. If it's manually stopped, it's restarted only when Docker daemon restarts or the container itself is manually restarted.
+- `unless-stopped` Similar to always, except that when the container is stopped (manually or otherwise), it isn't restarted even after Docker daemon restarts.
+
+`no` is the default restart policy value for all kinds, but `linux`. Linux kind defaults to `always`.
+
+```yaml
+topology:
+  nodes:
+    srl:
+      image: ghcr.io/nokia/srlinux
+      kind: nokia_srlinux
+      restart-policy: always
+    alpine:
+      kind: linux
+      image: alpine
+      restart-policy: "no"
+```
+
 ### license
 
 Some containerized NOSes require a license to operate or can leverage a license to lift-off limitations of an unlicensed version. With `license` property a user sets a path to a license file that a node will use. The license file will then be mounted to the container by the path that is defined by the `kind/type` of the node.
@@ -451,7 +477,7 @@ Read more about user-defined management addresses [here](network.md#user-defined
 nodes:
     r1:
       kind: nokia_srlinux
-      mgmt_ipv6: 2001:172:20:20::100
+      mgmt_ipv6: 3fff:172:20:20::100
 ```
 
 ### DNS
@@ -667,7 +693,7 @@ topology:
 
 ### stages
 
-Containerlab v0.51.0 introduces a new concept of **stages**. Stages are a way to define stages a node goes through during its lifecycle and the interdependencies between the different stages of different nodes in the lab.
+Stages are a way to define stages a node goes through during its lifecycle and the interdependencies between the different stages of different nodes in the lab.
 
 The stages are currently mainly used to host the `wait-for` knob, which is used to define the startup dependencies between nodes.
 
@@ -739,8 +765,7 @@ The existing [`exec`](#exec) node configuration parameter is used to run command
 
 These more advanced command execution scenarios are enabled in the per-stage command execution feature.
 
-<!-- --8<-- [start:per-stage-1] -->
-With per-stage command execution the user can define `exec` block under each stage; moreover, it is possible to specify when the commands should be run `on-enter` or `on-exit` of the stage.
+With per-stage command execution the user can define `exec` block under each stage; moreover, it is possible to specify when the commands should be run `on-enter` or `on-exit` of the stage. And if that is not enough, you can also specify where the command should be executed, on the host or in the container.
 
 ```yaml
 nodes:
@@ -748,15 +773,36 @@ nodes:
     stages:
       create-links:
         exec:
-          on-enter:
-            - ls /sys/class/net/
+          - command: ls /sys/class/net/
+            target: container #(1)!
+            phase: on-enter #(2)!
 ```
+
+1. `target` defaults to "container" and can be omitted. Possible values `container` or `host`
+2. `phase` defaults to "on-enter" and can be omitted. Possible values `on-enter` or `on-exit`
 
 In the example above, the `ls /sys/class/net/` command will be executed when `node1` is about to enter the `create-links` stage. As expected, the command will list only interfaces provisioned by docker (eth0 and lo), but none of the containerlab-provisioned interfaces, since the create-links stage has not been finished yet.
 
 Per-stage command execution gives you additional flexibility in terms of when the commands are executed, and what commands are executed at each stage.
 
-<!-- --8<-- [end:per-stage-1] -->
+##### Host exec
+
+The stage's `exec` property runs the commands in the container namespace and therefore targets the container node itself. This is super useful in itself, but sometimes you need to run a command on the host as a reaction to a stage enter/exit event.
+
+This is what `target` property of the stage's `exec` is designed for. It runs the command in the host namespace and therefore targets the host itself.
+
+```yaml
+nodes:
+  node1:
+    stages:
+      create-links:
+        exec:
+          - command: touch /tmp/hello
+            target: host
+            phase: on-enter
+```
+
+In the example above, containerlab will run `touch /tmp/hello` command when the `node1` is about to enter the `create-links` stage.
 
 ### certificate
 
@@ -844,3 +890,17 @@ When the node is configured with a healthcheck the health status is visible in t
 
 [^1]: [docker runtime resources constraints](https://docs.docker.com/config/containers/resource_constraints/).
 [^2]: this deployment model makes two containers to use a shared network namespace, similar to a Kubernetes pod construct.
+
+### aliases
+
+To define additional hostnames for the node use the `aliases` configuration option. Other containers on the same network can use these aliases to communicate with the node.
+
+```yaml
+topology:
+  nodes:
+    r1:
+      kind: nokia_srlinux
+      image: ghcr.io/nokia/srlinux
+      aliases:
+        - r1.example.com
+```

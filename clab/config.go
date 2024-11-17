@@ -28,7 +28,7 @@ const (
 	// a name of a docker network that nodes management interfaces connect to.
 	dockerNetName     = "clab"
 	dockerNetIPv4Addr = "172.20.20.0/24"
-	dockerNetIPv6Addr = "2001:172:20:20::/64"
+	dockerNetIPv6Addr = "3fff:172:20:20::/64"
 	// veth link mtu.
 	DefaultVethLinkMTU = 9500
 
@@ -197,10 +197,12 @@ func (c *CLab) createNodeCfg(nodeName string, nodeDef *types.NodeDefinition, idx
 		Memory:          c.Config.Topology.GetNodeMemory(nodeName),
 		StartupDelay:    c.Config.Topology.GetNodeStartupDelay(nodeName),
 		AutoRemove:      c.Config.Topology.GetNodeAutoRemove(nodeName),
+		RestartPolicy:   c.Config.Topology.GetRestartPolicy(nodeName),
 		Extras:          c.Config.Topology.GetNodeExtras(nodeName),
 		DNS:             c.Config.Topology.GetNodeDns(nodeName),
 		Certificate:     c.Config.Topology.GetCertificateConfig(nodeName),
 		Healthcheck:     c.Config.Topology.GetHealthCheckConfig(nodeName),
+		Aliases:         c.Config.Topology.GetNodeAliases(nodeName),
 	}
 	var err error
 
@@ -388,9 +390,11 @@ func (c *CLab) verifyLinks(ctx context.Context) error {
 }
 
 // LoadKernelModules loads containerlab-required kernel modules.
-func (c *CLab) loadKernelModules() error {
+func (*CLab) loadKernelModules() error {
 	modules := []string{"ip_tables", "ip6_tables"}
-
+	opts := []kmod.Option{
+		kmod.SetInitFunc(utils.ModInitFunc),
+	}
 	for _, m := range modules {
 		isLoaded, err := utils.IsKernelModuleLoaded(m)
 		if err != nil {
@@ -405,7 +409,7 @@ func (c *CLab) loadKernelModules() error {
 
 		log.Debugf("kernel module %q is not loaded. Trying to load", m)
 		// trying to load the kernel modules.
-		km, err := kmod.New()
+		km, err := kmod.New(opts...)
 		if err != nil {
 			log.Warnf("Unable to init module loader: %v. Skipping...", err)
 

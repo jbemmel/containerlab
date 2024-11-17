@@ -245,6 +245,18 @@ func (t *Topology) GetNodeAutoRemove(name string) bool {
 	return false
 }
 
+func (t *Topology) GetRestartPolicy(name string) string {
+	if ndef, ok := t.Nodes[name]; ok {
+		if l := ndef.GetRestartPolicy(); l != "" {
+			return l
+		}
+		if l := t.GetKind(t.GetNodeKind(name)).GetRestartPolicy(); l != "" {
+			return l
+		}
+	}
+	return t.GetDefaults().GetRestartPolicy()
+}
+
 func (t *Topology) GetNodeLicense(name string) string {
 	if ndef, ok := t.Nodes[name]; ok {
 		if l := ndef.GetLicense(); l != "" {
@@ -497,7 +509,8 @@ func (t *Topology) GetStages(name string) (*Stages, error) {
 	if nodeStages != nil {
 		s.Merge(nodeStages)
 	}
-
+	// set nil values to their respective defaults
+	s.InitDefaults()
 	return s, nil
 }
 
@@ -566,5 +579,12 @@ func (t *Topology) GetHealthCheckConfig(name string) *HealthcheckConfig {
 		return t.GetDefaults().GetHealthcheckConfig()
 	}
 
+	return nil
+}
+
+func (t *Topology) GetNodeAliases(name string) []string {
+	if ndef, ok := t.Nodes[name]; ok {
+		return ndef.GetAliases()
+	}
 	return nil
 }
