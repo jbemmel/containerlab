@@ -16,6 +16,7 @@ ${runtime}                  docker
 ${runtime-cli-exec-cmd}     sudo docker exec
 ${n2-ipv4}                  172.20.20.100/24
 ${n2-ipv6}                  3fff:172:20:20::100/64
+${table-delimit}            │
 
 
 *** Test Cases ***
@@ -97,6 +98,21 @@ Ensure CLAB_INTFS env var is set
     # we literally check if the string stdout:\n3 is present in the output, as this is how
     # the result is printed today.
     Should Contain    ${output.stderr}    stdout:\\n3
+
+Ensure default no_proxy env var is set
+    [Documentation]
+    ...    This test ensures that the NO_PROXY env var is populated by clab automatically
+    ...    with the relevant addresses and names
+    ${output} =    Process.Run Process
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} exec -t ${CURDIR}/${lab-file} --label clab-node-name\=l1 --cmd 'ash -c "echo $NO_PROXY"'
+    ...    shell=True
+    Log    ${output.stdout}
+    Log    ${output.stderr}
+    Should Be Equal As Integers    ${output.rc}    0
+
+    Should Contain
+    ...    ${output.stderr}
+    ...    localhost,127.0.0.1,::1,*.local,172.20.20.0/24,172.20.20.100,172.20.20.99,3fff:172:20:20::/64,3fff:172:20:20::100,3fff:172:20:20::99,l1,l2,l3
 
 Inspect ${lab-name} lab using its name
     ${rc}    ${output} =    Run And Return Rc And Output
@@ -190,17 +206,30 @@ Ensure "inspect all" outputs IP addresses
     ...    sudo -E ${CLAB_BIN} --runtime ${runtime} inspect --all
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
-    # get a 3rd line from the bottom of the inspect cmd.
-    # this relates to the l2 node
-    ${line} =    String.Get Line    ${output}    -3
+
+    # get a 4th line from the bottom of the inspect cmd.
+    # this relates to the l2 node ipv4
+    ${line} =    String.Get Line    ${output}    -6
     Log    ${line}
-    @{data} =    Split String    ${line}    |
+
+    @{data} =    Split String    ${line}    ${table-delimit}
     Log    ${data}
+
     # verify ipv4 address
-    ${ipv4} =    String.Strip String    ${data}[9]
-    Should Match Regexp    ${ipv4}    ^[\\d\\.]+/\\d{1,2}$
+    ${ipv4} =    String.Strip String    ${data}[6]
+    Should Match Regexp    ${ipv4}    ^[\\d\\.]+$
+
+    # get a 3rd line from the bottom of the inspect cmd.
+    # this relates to the l2 node ipv6
+    ${line} =    String.Get Line    ${output}    -5
+    Log    ${line}
+
+    @{data} =    Split String    ${line}    ${table-delimit}
+    Log    ${data}
+
     # verify ipv6 address
-    Run Keyword    Match IPv6 Address    ${data}[10]
+    ${ipv6} =    String.Strip String    ${data}[6]
+    Run Keyword    Match IPv6 Address    ${ipv6}
 
 Verify bind mount in l1 node
     ${rc}    ${output} =    Run And Return Rc And Output
@@ -282,11 +311,37 @@ Verify iptables allow rule is set
     ...    sudo iptables -vnL DOCKER-USER
     Log    ${ipt}
     # debian 12 uses `0` for protocol, while previous versions use `all`
+    # this matches the rule in the in direction
     Should Contain Any    ${ipt}
     ...    ACCEPT all -- * ${MgmtBr}
     ...    ACCEPT 0 -- * ${MgmtBr}
     ...    ignore_case=True
     ...    collapse_spaces=True
+
+    # this matches the rule in the out direction
+    Should Contain Any    ${ipt}
+    ...    ACCEPT all -- ${MgmtBr} *
+    ...    ACCEPT 0 -- ${MgmtBr} *
+    ...    ignore_case=True
+    ...    collapse_spaces=True
+
+Verify ip6tables allow rule is set
+    [Documentation]    Checking if ip6tables allow rule is set so that external traffic can reach containerlab management network
+    Skip If    '${runtime}' != 'docker'
+
+    # Add check for ip6tables availability
+    ${rc}    ${output} =    Run And Return Rc And Output    which nft
+    Skip If    ${rc} != 0    nft command not found
+
+    ${rc}    ${output} =    Run And Return Rc And Output    sudo nft list tables
+    Skip If    'ip6 filter' not in '''${output}'''    ip6 filter chain not found
+
+    ${ipt} =    Run
+    ...    sudo nft list chain ip6 filter DOCKER-USER
+    Log    ${ipt}
+    Should Match Regexp    ${ipt}    oifname.*${MgmtBr}.*accept
+    Should Match Regexp    ${ipt}    iifname.*${MgmtBr}.*accept
+
 
 Verify DNS-Server Config
     [Documentation]    Check if the DNS config did take effect
@@ -334,7 +389,7 @@ Verify Exec rc != 0 on no containers match
 Verify l1 node is healthy
     [Documentation]    Checking if l1 node is healthy after the lab is deployed
 
-    Sleep    3s
+    Sleep    10s
 
     ${output} =    Process.Run Process
     ...    sudo ${runtime} inspect clab-${lab-name}-l1 -f ''{{.State.Health.Status}}''
@@ -374,10 +429,25 @@ Verify iptables allow rule are gone
     Log    ${ipt}
     Should Not Contain    ${ipt}    ${MgmtBr}
 
+Verify ip6tables allow rule are gone
+    [Documentation]    Checking if ip6tables allow rule is removed once the lab is destroyed
+    Skip If    '${runtime}' != 'docker'
+
+    # Add check for ip6tables availability
+    ${rc}    ${output} =    Run And Return Rc And Output    which nft
+    Skip If    ${rc} != 0    nft command not found
+
+    ${rc}    ${output} =    Run And Return Rc And Output    sudo nft list tables
+    Skip If    'ip6 filter' not in '''${output}'''    ip6 filter chain not found
+
+    ${ipt} =    Run
+    ...    sudo nft list chain ip6 filter DOCKER-USER
+    Log    ${ipt}
+    Should Not Contain    ${ipt}    ${MgmtBr}
 
 *** Keywords ***
 Match IPv6 Address
     [Arguments]
     ...    ${address}=${None}
     ${ipv6} =    String.Strip String    ${address}
-    Should Match Regexp    ${ipv6}    ^[\\d:abcdef]+/\\d{1,2}$
+    Should Match Regexp    ${ipv6}    ^[\\d:abcdef]+$

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 
@@ -16,36 +15,13 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/srl-labs/containerlab/clab"
 	"github.com/srl-labs/containerlab/links"
-	"github.com/srl-labs/containerlab/nodes/srl"
+	"github.com/srl-labs/containerlab/nodes"
 	"github.com/srl-labs/containerlab/types"
+	"github.com/srl-labs/containerlab/utils"
 	"gopkg.in/yaml.v2"
 )
 
-var interfaceFormat = map[string]string{
-	"srl":      "e1-%d",
-	"ceos":     "eth%d",
-	"crpd":     "eth%d",
-	"sonic-vs": "eth%d",
-	"linux":    "eth%d",
-	"bridge":   "veth%d",
-	"vr-sros":  "eth%d",
-	"vr-vmx":   "ge-0/0/%d",
-	"vr-vsrx":  "ge-0/0/%d",
-	"vr-vqfx":  "ge-0/0/%d",
-	"vr-xrv9k": "Gi0/0/0/%d",
-	"vr-veos":  "Et1/%d",
-	"xrd":      "eth%d",
-	"rare":     "eth%d",
-}
-
-var supportedKinds = []string{
-	"srl", "ceos", "linux", "bridge", "sonic-vs", "crpd", "vr-sros", "vr-vmx", "vr-vsrx",
-	"vr-vqfx", "juniper_vjunosevolved", "juniper_vjunosrouter", "juniper_vjunosswitch", "vr-xrv9k", "vr-veos",
-	"xrd", "rare", "openbsd", "cisco_ftdv", "freebsd",
-}
-
 const (
-	defaultSRLType     = srl.SRLinuxDefaultType
 	defaultNodePrefix  = "node"
 	defaultGroupPrefix = "tier"
 )
@@ -64,6 +40,7 @@ var (
 	groupPrefix string
 	file        string
 	deploy      bool
+	reg         *nodes.NodeRegistry
 )
 
 type nodesDef struct {
@@ -77,7 +54,7 @@ var generateCmd = &cobra.Command{
 	Use:     "generate",
 	Aliases: []string{"gen"},
 	Short:   "generate a Clos topology file, based on provided flags",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if name == "" {
 			return errors.New("provide a lab name with --name flag")
 		}
@@ -106,7 +83,7 @@ var generateCmd = &cobra.Command{
 		}
 		log.Debugf("generated topo: %s", string(b))
 		if file != "" {
-			err = saveTopoFile(file, b)
+			err = utils.CreateFile(file, string(b))
 			if err != nil {
 				return err
 			}
@@ -115,7 +92,7 @@ var generateCmd = &cobra.Command{
 			reconfigure = true
 			if file == "" {
 				file = fmt.Sprintf("%s.clab.yml", name)
-				err = saveTopoFile(file, b)
+				err = utils.CreateFile(file, string(b))
 				if err != nil {
 					return err
 				}
@@ -131,6 +108,22 @@ var generateCmd = &cobra.Command{
 }
 
 func init() {
+	c := &clab.CLab{}
+	c.Reg = nodes.NewNodeRegistry()
+	c.RegisterNodes()
+
+	reg = c.Reg
+
+	generateNodesAttributes := reg.GetGenerateNodeAttributes()
+	supportedKinds := []string{}
+
+	// prepare list of generateable node kinds
+	for k, v := range generateNodesAttributes {
+		if v.IsGenerateable() {
+			supportedKinds = append(supportedKinds, k)
+		}
+	}
+
 	rootCmd.AddCommand(generateCmd)
 	generateCmd.Flags().StringVarP(&mgmtNetName, "network", "", "", "management network name")
 	generateCmd.Flags().IPNetVarP(&mgmtIPv4Subnet, "ipv4-subnet", "4", net.IPNet{}, "management network IPv4 subnet range")
@@ -194,6 +187,9 @@ func generateTopologyConfig(name, network, ipv4range, ipv6range string,
 			}
 		}
 	}
+
+	generateNodesAttributes := reg.GetGenerateNodeAttributes()
+
 	for i := 0; i < numStages-1; i++ {
 		interfaceOffset := uint(0)
 		if i > 0 {
@@ -222,9 +218,9 @@ func generateTopologyConfig(name, network, ipv4range, ipv6range string,
 				l := &links.LinkVEthRaw{
 					Endpoints: []*links.EndpointRaw{
 						links.NewEndpointRaw(node1, fmt.Sprintf(
-							interfaceFormat[nodes[i].kind], k+1+interfaceOffset), ""),
+							generateNodesAttributes[nodes[i].kind].GetInterfaceFormat(), k+1+interfaceOffset), ""),
 						links.NewEndpointRaw(node2, fmt.Sprintf(
-							interfaceFormat[nodes[i+1].kind], j+1), ""),
+							generateNodesAttributes[nodes[i+1].kind].GetInterfaceFormat(), j+1), ""),
 					},
 				}
 
@@ -323,18 +319,4 @@ func parseNodesFlag(kind string, nodes ...string) ([]nodesDef, error) {
 		result[idx] = def
 	}
 	return result, nil
-}
-
-func saveTopoFile(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666) // skipcq: GSC-G302
-	if err != nil {
-		return err
-	}
-
-	_, err = f.Write(data)
-	if err != nil {
-		return err
-	}
-
-	return f.Close()
 }

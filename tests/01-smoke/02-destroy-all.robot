@@ -30,7 +30,7 @@ Deploy first lab
     Log    ${result.stdout}
     Log    ${result.stderr}
     Should Be Equal As Integers    ${result.rc}    0
-    Should Exist    %{PWD}/clab-2-linux-nodes
+    Should Exist    ${CURDIR}/clab-2-linux-nodes
 
     Set Suite Variable    ${orig_dir}    ${CURDIR}
 
@@ -42,39 +42,40 @@ Deploy second lab
     Log    ${result.stdout}
     Log    ${result.stderr}
     Should Be Equal As Integers    ${result.rc}    0
-    Should Exist    /tmp/clab-single-node
+    Should Exist    ${CURDIR}/clab-single-node
 
 Inspect ${lab2-name} lab using its name
     ${rc}    ${output} =    Run And Return Rc And Output
     ...    sudo -E ${CLAB_BIN} --runtime ${runtime} inspect --name ${lab2-name}
-    Log    ${output}
+    Log    \n--> LOG: Inspect output\n${output}    console=True
     Should Be Equal As Integers    ${rc}    0
 
     ${num_lines} =    Run    bash -c "echo '${output}' | wc -l"
-    # lab2 only has 1 nodes and therefore inspect output should contain only 1 node (+4 lines for the table header and footer)
-    Should Be Equal As Integers    ${num_lines}    5
+    # lab2 only has 1 nodes and therefore inspect output should contain only 1 node with two lines
+    # (+4 lines for the table header and footer)
+    Should Be Equal As Integers    ${num_lines}    6
 
 Inspect ${lab2-name} lab using topology file reference
     ${result} =    Run Process
     ...    sudo -E ${CLAB_BIN} --runtime ${runtime} inspect -t ${orig_dir}/${lab2-file}
     ...    shell=True
-    Log    ${result.stdout}
+    Log    \n--> LOG: Inspect output\n${result.stdout}    console=True
     Log    ${result.stderr}
     Should Be Equal As Integers    ${result.rc}    0
 
     ${num_lines} =    Run    bash -c "echo '${result.stdout}' | wc -l"
     # lab2 only has 1 nodes and therefore inspect output should contain only 1 node
-    Should Be Equal As Integers    ${num_lines}    5
+    Should Be Equal As Integers    ${num_lines}    6
 
 Inspect all
     ${rc}    ${output} =    Run And Return Rc And Output
     ...    sudo -E ${CLAB_BIN} --runtime ${runtime} inspect --all
-    Log    ${output}
+    Log    \n--> LOG: Inspect all output\n${output}    console=True
     Should Be Equal As Integers    ${rc}    0
 
     ${num_lines} =    Run    bash -c "echo '${output}' | wc -l"
-    # 3 nodes in lab1 and 1 node in lab2 (+4 lines for the header and footer)
-    Should Be Equal As Integers    ${num_lines}    8
+    # 3 nodes in lab1 and 1 node in lab2 (+ for the header, footer and row delimiters)
+    Should Be Equal As Integers    ${num_lines}    15
 
 Verify host mode networking for node l3
     # l3 node is launched with host mode networking
@@ -91,7 +92,17 @@ Verify ipv4-range is set correctly
     ${rc}    ${output} =    Run And Return Rc And Output
     ...    sudo -E ${CLAB_BIN} --runtime ${runtime} inspect -t ${CURDIR}/01-linux-single-node.clab.yml
     Log    ${output}
-    Should Contain    ${output}    172.20.30.9/24
+    Should Contain    ${output}    172.20.30.9
+
+Redeploy second lab
+    ${result} =    Run Process
+    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} redeploy -c -t ${CURDIR}/${lab2-file}
+    ...    cwd=/tmp    # using a different cwd to check lab resolution via container labels
+    ...    shell=True
+    Log    ${result.stdout}
+    Log    ${result.stderr}
+    Should Be Equal As Integers    ${result.rc}    0
+    Should Exist    ${CURDIR}/clab-single-node
 
 Destroy all labs
     ${rc}    ${output} =    Run And Return Rc And Output
@@ -105,4 +116,4 @@ Check all labs have been removed
     Log    ${output}
     Should Contain    ${output}    no containers found
     Should Not Exist    /tmp/single-node
-    Should Not Exist    %{PWD}/clab-2-linux-nodes
+    Should Not Exist    ${CURDIR}/clab-2-linux-nodes

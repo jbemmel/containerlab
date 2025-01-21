@@ -41,6 +41,9 @@ var (
 )
 
 const (
+	generateable     = true
+	generateIfFormat = "1/1/%d"
+
 	vrsrosDefaultType   = "sr-1"
 	scrapliPlatformName = "nokia_sros"
 	configDirName       = "tftpboot"
@@ -56,9 +59,11 @@ type SROSTemplateData struct {
 
 // Register registers the node in the NodeRegistry.
 func Register(r *nodes.NodeRegistry) {
+	generateNodeAttributes := nodes.NewGenerateNodeAttributes(generateable, generateIfFormat)
+	nrea := nodes.NewNodeRegistryEntryAttributes(defaultCredentials, generateNodeAttributes)
 	r.Register(kindNames, func() nodes.Node {
 		return new(vrSROS)
-	}, defaultCredentials)
+	}, nrea)
 }
 
 type vrSROS struct {
@@ -257,8 +262,10 @@ func (s *vrSROS) applyPartialConfig(ctx context.Context, addr, platformName,
 		return err
 	}
 
+	configContentStr := string(configContent)
+
 	// check file contains content, otherwise exit early
-	if strings.TrimSpace(string(configContent)) == "" {
+	if strings.TrimSpace(configContentStr) == "" {
 		return nil
 	}
 
@@ -310,8 +317,16 @@ func (s *vrSROS) applyPartialConfig(ctx context.Context, addr, platformName,
 			}
 		}
 	}
-	// converting byte slice to newline delimited string slice
-	cfgs := strings.Split(string(configContent), "\n")
+
+	// Normalize character sequences to avoid interaction issues with CLI
+	replacer := strings.NewReplacer(
+		"\r\n", "\n", // replace EOL CRLF with LF
+		"\t", "    ", // replace tabs with 4 spaces
+	)
+	configContentStr = replacer.Replace(configContentStr)
+
+	// converting string to newline delimited string slice
+	cfgs := strings.Split(configContentStr, "\n")
 
 	// config snippets should not have commit command, so we need to commit manually
 	// and quit from the config mode

@@ -56,6 +56,9 @@ type CLab struct {
 	// nodeFilter is a list of node names to be deployed,
 	// names are provided exactly as they are listed in the topology file.
 	nodeFilter []string
+	// checkBindsPaths toggle enables or disables binds paths checks
+	// when set to true, bind sources are verified to exist on the host.
+	checkBindsPaths bool
 }
 
 type ClabOption func(c *CLab) error
@@ -75,6 +78,14 @@ func WithTimeout(dur time.Duration) ClabOption {
 func WithLabName(n string) ClabOption {
 	return func(c *CLab) error {
 		c.Config.Name = n
+		return nil
+	}
+}
+
+// WithSkippedBindsPathsCheck skips the binds paths checks.
+func WithSkippedBindsPathsCheck() ClabOption {
+	return func(c *CLab) error {
+		c.checkBindsPaths = false
 		return nil
 	}
 }
@@ -333,11 +344,12 @@ func NewContainerLab(opts ...ClabOption) (*CLab, error) {
 			Mgmt:     new(types.MgmtNet),
 			Topology: types.NewTopology(),
 		},
-		m:        new(sync.RWMutex),
-		Nodes:    make(map[string]nodes.Node),
-		Links:    make(map[int]links.Link),
-		Runtimes: make(map[string]runtime.ContainerRuntime),
-		Cert:     &cert.Cert{},
+		m:               new(sync.RWMutex),
+		Nodes:           make(map[string]nodes.Node),
+		Links:           make(map[int]links.Link),
+		Runtimes:        make(map[string]runtime.ContainerRuntime),
+		Cert:            &cert.Cert{},
+		checkBindsPaths: true,
 	}
 
 	// init a new NodeRegistry
@@ -981,7 +993,7 @@ func (c *CLab) Deploy(ctx context.Context, options *DeployOptions) ([]runtime.Ge
 		return nil, err
 	}
 
-	err = links.SetMgmtNetUnderlayingBridge(c.Config.Mgmt.Bridge)
+	err = links.SetMgmtNetUnderlyingBridge(c.Config.Mgmt.Bridge)
 	if err != nil {
 		return nil, err
 	}
@@ -1238,7 +1250,7 @@ func (c *CLab) Destroy(ctx context.Context, maxWorkers uint, keepMgmtNet bool) e
 
 // Exec execute commands on running topology nodes.
 func (c *CLab) Exec(ctx context.Context, cmds []string, options *ExecOptions) (*exec.ExecCollection, error) {
-	err := links.SetMgmtNetUnderlayingBridge(c.Config.Mgmt.Bridge)
+	err := links.SetMgmtNetUnderlyingBridge(c.Config.Mgmt.Bridge)
 	if err != nil {
 		return nil, err
 	}

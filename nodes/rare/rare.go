@@ -14,13 +14,21 @@ import (
 	"github.com/srl-labs/containerlab/utils"
 )
 
-var kindnames = []string{"rare"}
+var kindNames = []string{"rare"}
+
+const (
+	generateable     = true
+	generateIfFormat = "eth%d"
+)
 
 // Register registers the node in the NodeRegistry.
 func Register(r *nodes.NodeRegistry) {
-	r.Register(kindnames, func() nodes.Node {
+	generateNodeAttributes := nodes.NewGenerateNodeAttributes(generateable, generateIfFormat)
+	nrea := nodes.NewNodeRegistryEntryAttributes(nil, generateNodeAttributes)
+
+	r.Register(kindNames, func() nodes.Node {
 		return new(rare)
-	}, nil)
+	}, nrea)
 }
 
 type rare struct {
@@ -39,7 +47,7 @@ func (n *rare) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
 	// make ipv6 disabled on all rare node interfaces unconditionally
 	// as ipv6 will be handled by rare/freertr
 	// The setting 'net.ipv6.conf.all.disable_ipv6' 1 - interferes with IPv6 out-of-band management. Commenting it out for now as a workaround.
-	// cfg.Sysctls["net.ipv6.conf.all.disable_ipv6"] = "1" 
+	// cfg.Sysctls["net.ipv6.conf.all.disable_ipv6"] = "1"
 
 	n.Cfg.Binds = append(n.Cfg.Binds,
 		fmt.Sprint(filepath.Join(n.Cfg.LabDir, "run"), ":/rtr/run"),

@@ -13,6 +13,8 @@ set / system tls server-profile clab-profile authenticate-client false
 
 {{ .GRPCConfig }}
 
+{{ .EDAConfig }}
+
 {{- if .EnableGNMIUnixSockServices }}
 system gnmi-server unix-socket services [ gnmi gnoi ] admin-state enable
 {{- end }}
@@ -26,6 +28,8 @@ set / system json-rpc-server admin-state enable network-instance mgmt http admin
 set / system json-rpc-server admin-state enable network-instance mgmt https admin-state enable tls-profile clab-profile
 
 {{ .SNMPConfig }}
+
+{{ .NetconfConfig }}
 
 set / system lldp admin-state enable
 set / system aaa authentication idle-timeout 7200

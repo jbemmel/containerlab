@@ -16,7 +16,7 @@ The `deploy` command spins up a lab using the topology expressed via [topology d
 
 With the global `--topo | -t` flag a user sets the path to the topology definition file that will be used to spin up a lab.
 
-When the topology path refers to a directory, containerlab will look for a file with `.clab.yml` extension in that directory and use it as a topology definition file.
+When the topology path refers to a directory, containerlab will look for a file with `.clab.yml` or `.clab.yaml` extension in that directory and use it as a topology definition file.
 
 When the topology file flag is omitted, containerlab will try to find the matching file name by looking at the current working directory.
 
@@ -166,7 +166,7 @@ Example command-line usage: `CLAB_VERSION_CHECK=disable containerlab deploy`
 
 To change the [lab directory](../manual/conf-artifacts.md#identifying-a-lab-directory) location, set `CLAB_LABDIR_BASE` environment variable accordingly. It denotes the base directory in which the lab directory will be created.
 
-The default behavior is to create the lab directory in the current working dir.
+The default behavior is to create the lab directory in the same directory as the topology file (`clab.yml` file).
 
 ### Examples
 

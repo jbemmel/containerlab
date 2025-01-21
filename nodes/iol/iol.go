@@ -9,15 +9,19 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/hairyhenderson/gomplate/v3"
 	"github.com/hairyhenderson/gomplate/v3/data"
+	"github.com/scrapli/scrapligo/driver/options"
+	"github.com/scrapli/scrapligo/platform"
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/links"
 	"github.com/srl-labs/containerlab/nodes"
@@ -30,43 +34,57 @@ const (
 	typeL2  = "l2"
 
 	iol_workdir = "/iol"
+
+	generateable     = true
+	generateIfFormat = "eth%d"
 )
 
 var (
-	kindnames          = []string{"cisco_iol"}
+	kindNames          = []string{"cisco_iol"}
 	defaultCredentials = nodes.NewCredentials("admin", "admin")
 
 	//go:embed iol.cfg.tmpl
 	cfgTemplate string
 
-	IOLCfgTpl, _ = template.New("clab-iol-default-config").Funcs(
-		gomplate.CreateFuncs(context.Background(), new(data.Data))).Parse(cfgTemplate)
-
-	InterfaceRegexp = regexp.MustCompile(`(?:e|Ethernet)\s?(?P<slot>\d+)/(?P<port>\d+)$`)
-	InterfaceOffset = 1
-	InterfaceHelp   = "eX/Y or EthernetX/Y (where X >= 0 and Y >= 1)"
+	// IntfRegexp with named capture groups for extracting slot and port.
+	CapturingIntfRegexp = regexp.MustCompile(`(?:e|Ethernet)\s?(?P<slot>\d+)/(?P<port>\d+)$`)
+	// ethX naming is the "raw" or "default" interface naming.
+	DefaultIntfRegexp = regexp.MustCompile(`eth[1-9]\d*$`)
+	// Match on the management interface.
+	MgmtIntfRegexp = regexp.MustCompile(`(eth0|e0/0|Ethernet0/0)$`)
+	// Matches on any allowed/legal interface name.
+	AllowedIntfRegexp = regexp.MustCompile(`(e|Ethernet)((0/[123])|([1-9]/[0-3]))$|eth[1-9]\d*$`)
+	IntfHelpMsg       = "Interfaces should follow Ethernet<slot>/<port> or e<slot>/<port> naming convention, where <slot> is a number from 0-9 and <port> is a number from 0-3. You can also use ethX-based interface naming."
 
 	validTypes = []string{typeIOL, typeL2}
 )
 
 // Register registers the node in the NodeRegistry.
 func Register(r *nodes.NodeRegistry) {
-	r.Register(kindnames, func() nodes.Node {
+	generateNodeAttributes := nodes.NewGenerateNodeAttributes(generateable, generateIfFormat)
+	nrea := nodes.NewNodeRegistryEntryAttributes(defaultCredentials, generateNodeAttributes)
+
+	r.Register(kindNames, func() nodes.Node {
 		return new(iol)
-	}, defaultCredentials)
+	}, nrea)
 }
 
 type iol struct {
 	nodes.DefaultNode
 
-	isL2Node  bool
-	Pid       string
-	nvramFile string
+	isL2Node          bool
+	Pid               string
+	nvramFile         string
+	partialStartupCfg string
+	bootCfg           string
+	interfaces        []IOLInterface
+	firstBoot         bool
 }
 
 func (n *iol) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
 	// Init DefaultNode
 	n.DefaultNode = *nodes.NewDefaultNode(n)
+	n.firstBoot = false
 
 	n.Cfg = cfg
 	for _, o := range opts {
@@ -101,16 +119,12 @@ func (n *iol) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
 		fmt.Sprint(path.Join(n.Cfg.LabDir, n.nvramFile), ":", path.Join(iol_workdir, n.nvramFile)),
 
 		// mount launch config
-		fmt.Sprint(filepath.Join(n.Cfg.LabDir, "startup.cfg"), ":/iol/config.txt"),
+		fmt.Sprint(filepath.Join(n.Cfg.LabDir, "boot_config.txt"), ":/iol/config.txt"),
 
 		// mount IOYAP and NETMAP for interface mapping
 		fmt.Sprint(filepath.Join(n.Cfg.LabDir, "iouyap.ini"), ":/iol/iouyap.ini"),
 		fmt.Sprint(filepath.Join(n.Cfg.LabDir, "NETMAP"), ":/iol/NETMAP"),
 	)
-
-	n.InterfaceRegexp = InterfaceRegexp
-	n.InterfaceOffset = InterfaceOffset
-	n.InterfaceHelp = InterfaceHelp
 
 	return nil
 }
@@ -126,10 +140,20 @@ func (n *iol) PreDeploy(ctx context.Context, params *nodes.PreDeployParams) erro
 	return n.CreateIOLFiles(ctx)
 }
 
-func (n *iol) PostDeploy(ctx context.Context, params *nodes.PostDeployParams) error {
+func (n *iol) PostDeploy(ctx context.Context, _ *nodes.PostDeployParams) error {
 	log.Infof("Running postdeploy actions for Cisco IOL '%s' node", n.Cfg.ShortName)
 
-	return n.GenInterfaceConfig(ctx)
+	n.GenBootConfig(ctx)
+
+	// Must update mgmt IP if not first boot
+	if !n.firstBoot {
+		// iol has a 5sec boot delay, wait a few extra secs for the console
+		time.Sleep(10 * time.Second)
+
+		return n.UpdateMgmtIntf(ctx)
+	}
+
+	return nil
 }
 
 func (n *iol) CreateIOLFiles(ctx context.Context) error {
@@ -138,15 +162,14 @@ func (n *iol) CreateIOLFiles(ctx context.Context) error {
 	if !utils.FileExists(path.Join(n.Cfg.LabDir, n.nvramFile)) {
 		// create nvram file
 		utils.CreateFile(path.Join(n.Cfg.LabDir, n.nvramFile), "")
+		n.firstBoot = true
 	}
 
 	// create these files so the bind monut doesn't automatically
 	// make folders.
-	utils.CreateFile(path.Join(n.Cfg.LabDir, "startup.cfg"), "")
-	utils.CreateFile(path.Join(n.Cfg.LabDir, "iouyap.ini"), "")
-	utils.CreateFile(path.Join(n.Cfg.LabDir, "NETMAP"), "")
+	utils.CreateFile(path.Join(n.Cfg.LabDir, "boot_config.txt"), "")
 
-	return nil
+	return n.GenInterfaceConfig(ctx)
 }
 
 // Generate interfaces configuration for IOL (and iouyap/netmap).
@@ -157,10 +180,8 @@ func (n *iol) GenInterfaceConfig(_ context.Context) error {
 
 	slot, port := 0, 0
 
-	IOLInterfaces := []IOLInterface{}
-
 	// Regexp to pull number out of linux'ethX' interface naming
-	IntfRegExpr := regexp.MustCompile("[0-9]+")
+	IntfRegExpr := regexp.MustCompile(`\d+`)
 
 	for _, intf := range n.Endpoints {
 
@@ -176,7 +197,7 @@ func (n *iol) GenInterfaceConfig(_ context.Context) error {
 		netmapdata += fmt.Sprintf("%s:%d/%d 513:%d/%d\n", n.Pid, slot, port, slot, port)
 
 		// populate template array for config
-		IOLInterfaces = append(IOLInterfaces,
+		n.interfaces = append(n.interfaces,
 			IOLInterface{
 				intf.GetIfaceName(),
 				x,
@@ -187,9 +208,31 @@ func (n *iol) GenInterfaceConfig(_ context.Context) error {
 
 	}
 
-	// create IOYAP and NETMAP file for interface mappings
-	utils.CreateFile(path.Join(n.Cfg.LabDir, "iouyap.ini"), iouyapData)
-	utils.CreateFile(path.Join(n.Cfg.LabDir, "NETMAP"), netmapdata)
+	// create IOUYAP and NETMAP file for interface mappings
+	err := utils.CreateFile(path.Join(n.Cfg.LabDir, "iouyap.ini"), iouyapData)
+	if err != nil {
+		return err
+	}
+	err = utils.CreateFile(path.Join(n.Cfg.LabDir, "NETMAP"), netmapdata)
+
+	return err
+}
+
+func (n *iol) GenBootConfig(_ context.Context) error {
+	n.bootCfg = cfgTemplate
+
+	if n.Cfg.StartupConfig != "" {
+		cfg, err := os.ReadFile(n.Cfg.StartupConfig)
+		if err != nil {
+			return err
+		}
+
+		if isPartialConfigFile(n.Cfg.StartupConfig) {
+			n.partialStartupCfg = string(cfg)
+		} else {
+			n.bootCfg = string(cfg)
+		}
+	}
 
 	// create startup config template
 	tpl := IOLTemplateData{
@@ -201,8 +244,12 @@ func (n *iol) GenInterfaceConfig(_ context.Context) error {
 		MgmtIPv6Addr:       n.Cfg.MgmtIPv6Address,
 		MgmtIPv6PrefixLen:  n.Cfg.MgmtIPv6PrefixLength,
 		MgmtIPv6GW:         n.Cfg.MgmtIPv6Gateway,
-		DataIFaces:         IOLInterfaces,
+		DataIFaces:         n.interfaces,
+		PartialCfg:         n.partialStartupCfg,
 	}
+
+	IOLCfgTpl, _ := template.New("clab-iol-default-config").Funcs(
+		gomplate.CreateFuncs(context.Background(), new(data.Data))).Parse(n.bootCfg)
 
 	// generate the config
 	buf := new(bytes.Buffer)
@@ -210,10 +257,8 @@ func (n *iol) GenInterfaceConfig(_ context.Context) error {
 	if err != nil {
 		return err
 	}
-	// write it to disk
-	utils.CreateFile(path.Join(n.Cfg.LabDir, "startup.cfg"), buf.String())
 
-	return err
+	return utils.CreateFile(path.Join(n.Cfg.LabDir, "boot_config.txt"), buf.String())
 }
 
 type IOLTemplateData struct {
@@ -226,9 +271,10 @@ type IOLTemplateData struct {
 	MgmtIPv6PrefixLen  int
 	MgmtIPv6GW         string
 	DataIFaces         []IOLInterface
+	PartialCfg         string
 }
 
-// IOLinterface struct stores mapping info between
+// IOLInterface struct stores mapping info between
 // IOL interface name and linux container interface.
 type IOLInterface struct {
 	IfaceName string
@@ -237,8 +283,8 @@ type IOLInterface struct {
 	Port      int
 }
 
-func (n *iol) GetMappedInterfaceName(ifName string) (string, error) {
-	captureGroups, err := utils.GetRegexpCaptureGroups(n.InterfaceRegexp, ifName)
+func (*iol) GetMappedInterfaceName(ifName string) (string, error) {
+	captureGroups, err := utils.GetRegexpCaptureGroups(CapturingIntfRegexp, ifName)
 	if err != nil {
 		return "", err
 	}
@@ -270,42 +316,102 @@ func (n *iol) GetMappedInterfaceName(ifName string) (string, error) {
 	}
 }
 
-var DefaultIntfRegexp = regexp.MustCompile(`eth[1-9][0-9]*$`)
-
-// AddEndpoint override version maps the endpoint name to an ethX-based name before adding it to the node endpoints. Returns an error if the mapping goes wrong.
+// AddEndpoint override maps the endpoint name to an ethX-based naming where neccesary, before adding it to the node endpoints. Returns an error if the mapping goes wrong or if the
+// interface name is NOT allowed.
 func (n *iol) AddEndpoint(e links.Endpoint) error {
 	endpointName := e.GetIfaceName()
-	// Slightly modified check: if it doesn't match the DefaultIntfRegexp, pass it to GetMappedInterfaceName. If it fails, then the interface name is wrong.
-	if n.InterfaceRegexp != nil && !(DefaultIntfRegexp.MatchString(endpointName)) {
+	var IFaceName, IFaceAlias string
+
+	IFaceName = endpointName
+
+	if !(DefaultIntfRegexp.MatchString(endpointName)) &&
+		AllowedIntfRegexp.MatchString(endpointName) {
+		log.Debugf("%s: %s needs mapping", n.Cfg.ShortName, endpointName)
 		mappedName, err := n.GetMappedInterfaceName(endpointName)
 		if err != nil {
-			return fmt.Errorf("%q interface name %q could not be mapped to an ethX-based interface name: %w",
-				n.Cfg.ShortName, e.GetIfaceName(), err)
+			return fmt.Errorf("%q interface name %q could not be mapped to an ethX-based interface name: %w\n%s",
+				n.Cfg.ShortName, e.GetIfaceName(), err, IntfHelpMsg)
 		}
 		log.Debugf("Interface Mapping: Mapping interface %q (ifAlias) to %q (ifName)", endpointName, mappedName)
-		e.SetIfaceName(mappedName)
-		e.SetIfaceAlias(endpointName)
+		IFaceName = mappedName
+		IFaceAlias = endpointName
 	}
+
+	e.SetIfaceName(IFaceName)
+	// should be nil if ethX naming is used.
+	e.SetIfaceAlias(IFaceAlias)
 	n.Endpoints = append(n.Endpoints, e)
 
 	return nil
 }
 
 func (n *iol) CheckInterfaceName() error {
-	// allow interface naming as Ethernet<slot>/<port> or e<slot>/<port>
-	InterfaceRegexp := regexp.MustCompile("Ethernet((0/[1-3])|([1-9]/[0-3]))$|e((0/[1-3])|([1-9]/[0-9]))$")
-
 	err := n.CheckInterfaceOverlap()
 	if err != nil {
 		return err
 	}
 
 	for _, e := range n.Endpoints {
-		IFaceName := e.GetIfaceAlias()
-		if !InterfaceRegexp.MatchString(IFaceName) {
-			return fmt.Errorf("IOL Node %q has an interface named %q which doesn't match the required pattern. Interfaces should be defined contigiously and named as Ethernet<slot>/<port> or e<slot>/<port>, where <slot> is a number from 0-9 and <port> is a number from 0-3. Management interface Ethernet0/0 cannot be used", n.Cfg.ShortName, IFaceName)
+		IFaceName := e.GetIfaceName()
+		if MgmtIntfRegexp.MatchString(IFaceName) {
+			return fmt.Errorf("IOL Node: %q. Management interface Ethernet0/0, e0/0 or eth0 is not allowed", n.Cfg.ShortName)
 		}
+
+		if !DefaultIntfRegexp.MatchString(IFaceName) {
+			return fmt.Errorf("IOL Node %q has an interface named %q which doesn't match the required pattern. %s",
+				n.Cfg.ShortName, IFaceName, IntfHelpMsg)
+		}
+
 	}
 
+	return nil
+}
+
+// from vr-sros.go
+// isPartialConfigFile returns true if the config file name contains .partial substring.
+func isPartialConfigFile(c string) bool {
+	return strings.Contains(strings.ToUpper(c), ".PARTIAL")
+}
+
+func (n *iol) UpdateMgmtIntf(ctx context.Context) error {
+	mgmt_str := fmt.Sprintf("\renable\rconfig terminal\rinterface Ethernet0/0\rip address %s %s\rno ipv6 address\ripv6 address %s/%d\rexit\rip route vrf clab-mgmt 0.0.0.0 0.0.0.0 Ethernet0/0 %s\ripv6 route vrf clab-mgmt ::/0 Ethernet0/0 %s\rend\rwr\r",
+		n.Cfg.MgmtIPv4Address, utils.CIDRToDDN(n.Cfg.MgmtIPv4PrefixLength), n.Cfg.MgmtIPv6Address,
+		n.Cfg.MgmtIPv6PrefixLength, n.Cfg.MgmtIPv4Gateway, n.Cfg.MgmtIPv6Gateway)
+
+	return n.Runtime.WriteToStdinNoWait(ctx, n.Cfg.ContainerID, []byte(mgmt_str))
+}
+
+// SaveConfig is used for "clab save" functionality -- it saves the running config to the startup configuration
+func (n *iol) SaveConfig(_ context.Context) error {
+	p, err := platform.NewPlatform(
+		"cisco_iosxe",
+		n.Cfg.LongName,
+		options.WithAuthNoStrictKey(),
+		options.WithAuthUsername(defaultCredentials.GetUsername()),
+		options.WithAuthPassword(defaultCredentials.GetPassword()),
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create platform; error: %+v", err)
+	}
+
+	d, err := p.GetNetworkDriver()
+	if err != nil {
+		return fmt.Errorf("failed to fetch network driver from the platform; error: %+v", err)
+	}
+
+	err = d.Open()
+	if err != nil {
+		return fmt.Errorf("failed to open driver; error: %+v", err)
+	}
+
+	defer d.Close()
+
+	_, err = d.SendCommand("write memory")
+	if err != nil {
+		return fmt.Errorf("failed to send command; error: %+v", err)
+	}
+
+	log.Infof("Successfully copied running configuration to startup configuration file for node: %q\n", n.Cfg.ShortName)
 	return nil
 }

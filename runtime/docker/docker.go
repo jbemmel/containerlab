@@ -320,7 +320,13 @@ func getMgmtBridgeIPs(bridgeName string, netResource networkapi.Inspect) (string
 			}
 		}
 	}
-	return v4, v6, err
+
+	// didnt find any gateways, fallthrough to returning the error
+	if v4 == "" && v6 == "" {
+		return "", "", err
+	}
+
+	return v4, v6, nil
 }
 
 // postCreateNetActions performs additional actions after the network has been created.
@@ -348,7 +354,7 @@ func (d *DockerRuntime) postCreateNetActions() (err error) {
 	if err != nil {
 		log.Warnf("failed to disable TX checksum offloading for the %s bridge interface: %v", d.mgmt.Bridge, err)
 	}
-	err = d.installFwdRule()
+	err = d.installMgmtNetworkFwdRule()
 	if err != nil {
 		log.Warnf("errors during iptables rules install: %v", err)
 	}
@@ -385,7 +391,7 @@ func (d *DockerRuntime) DeleteNet(ctx context.Context) (err error) {
 		return err
 	}
 
-	err = d.deleteFwdRule()
+	err = d.deleteMgmtNetworkFwdRule()
 	if err != nil {
 		log.Warnf("errors during iptables rules removal: %v", err)
 	}
@@ -431,6 +437,7 @@ func (d *DockerRuntime) CreateContainer(ctx context.Context, node *types.NodeCon
 		AttachStderr: true,
 		Hostname:     node.ShortName,
 		Tty:          true,
+		OpenStdin:    true,
 		User:         node.User,
 		Labels:       node.Labels,
 		ExposedPorts: node.PortSet,
@@ -1044,4 +1051,25 @@ func (d *DockerRuntime) IsHealthy(ctx context.Context, cID string) (bool, error)
 		return false, fmt.Errorf("no health information available for container: %s", cID)
 	}
 	return inspect.State.Health.Status == "healthy", nil
+}
+
+func (d *DockerRuntime) WriteToStdinNoWait(ctx context.Context, cID string, data []byte) error {
+	stdin, err := d.Client.ContainerAttach(ctx, cID, container.AttachOptions{
+		Stdin:  true,
+		Stream: true,
+		Stdout: true,
+		Stderr: true,
+	})
+	if err != nil {
+		return err
+	}
+
+	log.Debugf("Writing to %s: %v", cID, data)
+
+	_, err = stdin.Conn.Write(data)
+	if err != nil {
+		return err
+	}
+
+	return stdin.Conn.Close()
 }

@@ -2,10 +2,12 @@ package srl
 
 import (
 	"context"
+	"os"
 	"regexp"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/srl-labs/containerlab/clab/exec"
+	"github.com/srl-labs/containerlab/utils"
 	"golang.org/x/mod/semver"
 )
 
@@ -61,11 +63,11 @@ set / acl acl-filter cpm type ipv6 entry 188 match transport destination-port va
 set / acl acl-filter cpm type ipv6 entry 188 action accept`
 
 	// grpc contains the grpc server(s) configuration for srlinux versions >= 24.3.
-	// It consists of the gNMI, gNOI, gRIBI, and p4RT services enabled on the `mgmt`
+	// It consists of the gNMI, gNOI, gNSI, gRIBI, and p4RT services enabled on the `mgmt`
 	// grpc server instance with a custom TLS profile.
 	// And in addition to the TLS secured services, the `insecure-mgmt` server instance
 	// is created that provides the same services but without TLS.
-	grpcConfig = `set / system grpc-server mgmt services [ gnmi gnoi gribi p4rt ]
+	grpcConfig = `set / system grpc-server mgmt services [ gnmi gnoi gnsi gribi p4rt ]
 set / system grpc-server mgmt tls-profile clab-profile
 set / system grpc-server mgmt rate-limit 65000
 set / system grpc-server mgmt network-instance mgmt
@@ -74,7 +76,7 @@ set / system grpc-server mgmt unix-socket admin-state enable
 set / system grpc-server mgmt admin-state enable
 delete / system grpc-server mgmt default-tls-profile
 
-set / system grpc-server insecure-mgmt services [ gnmi gnoi gribi p4rt ]
+set / system grpc-server insecure-mgmt services [ gnmi gnoi gnsi gribi p4rt ]
 set / system grpc-server insecure-mgmt port 57401
 set / system grpc-server insecure-mgmt rate-limit 65000
 set / system grpc-server insecure-mgmt network-instance mgmt
@@ -94,6 +96,13 @@ set / acl acl-filter cpm type ipv6 entry 368 match ipv6 next-header tcp
 set / acl acl-filter cpm type ipv6 entry 368 match transport destination-port operator eq
 set / acl acl-filter cpm type ipv6 entry 368 match transport destination-port value 57401
 set / acl acl-filter cpm type ipv6 entry 368 action accept`
+
+	netconfConfig = `set / system netconf-server mgmt admin-state enable ssh-server mgmt-netconf
+set / system ssh-server mgmt-netconf admin-state enable
+set / system ssh-server mgmt-netconf network-instance mgmt
+set / system ssh-server mgmt-netconf port 830
+set / system ssh-server mgmt-netconf disable-shell true
+`
 )
 
 // SrlVersion represents an sr linux version as a set of fields.
@@ -155,13 +164,18 @@ func (n *srl) setVersionSpecificParams(tplData *srlTemplateData) {
 	// in srlinux >= v23.10+ linuxadmin and admin user ssh keys can only be configured via the cli
 	// so we add the keys to the template data for rendering.
 	if len(n.sshPubKeys) > 0 && (semver.Compare(v, "v23.10") >= 0 || n.swVersion.Major == "0") {
-		tplData.SSHPubKeys = catenateKeys(n.sshPubKeys)
+		tplData.SSHPubKeys = utils.MarshalAndCatenateSSHPubKeys(n.sshPubKeys)
 	}
 
 	// in srlinux >= v24.3+ we add ACL rules to enable http and telnet access
 	// that are useful for labs and were removed as a security hardening measure.
 	if semver.Compare(v, "v24.3") >= 0 || n.swVersion.Major == "0" {
 		tplData.ACLConfig = aclConfig
+	}
+
+	// in srlinux >= v24.7+ we add Netconf server config to enable Netconf.
+	if semver.Compare(v, "v24.7") >= 0 || n.swVersion.Major == "0" {
+		tplData.NetconfConfig = netconfConfig
 	}
 
 	// in srlinux v23.10.x we need to enable GNMI unix socket services to enable
@@ -176,5 +190,18 @@ func (n *srl) setVersionSpecificParams(tplData *srlTemplateData) {
 		tplData.SNMPConfig = snmpv2ConfigPre24_3
 
 		tplData.GRPCConfig = grpcConfigPre24_3
+	}
+
+	// in srlinux >= v24.10+ we add EDA configuration.
+	if semver.Compare(v, "v24.10") >= 0 || n.swVersion.Major == "0" {
+		cfg := edaDiscoveryServerConfig
+
+		if os.Getenv("CLAB_EDA_USE_DEFAULT_GRPC_SERVER") != "" {
+			cfg = cfg + "\n" + edaDefaultMgmtServerConfig
+		} else {
+			cfg = cfg + "\n" + edaCustomMgmtServerConfig
+		}
+
+		tplData.EDAConfig = cfg
 	}
 }

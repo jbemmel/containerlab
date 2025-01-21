@@ -14,7 +14,7 @@ The `destroy` command destroys a lab referenced by its [topology definition file
 
 #### topology
 
-With the global `--topo | -t` flag a user sets the path to the topology definition file that will be used to spin up a lab.
+With the global `--topo | -t` flag a user sets the path to the topology definition file that will be used to identify the lab to destroy.
 
 When the topology path refers to a directory, containerlab will look for a file with `.clab.yml` extension in that directory and use it as a topology definition file.
 
@@ -36,7 +36,7 @@ To make containerlab attempt a graceful shutdown of the running containers, add 
 
 #### keep-mgmt-net
 
-Do not try to remove the management network. Usually the management docker network (in case of docker) and the underlaying bridge are being removed. If you have attached additional resources outside of containerlab and you want the bridge to remain intact just add the `--keep-mgmt-net` flag.
+Do not try to remove the management network. Usually the management docker network (in case of docker) and the underlying bridge are being removed. If you have attached additional resources outside of containerlab and you want the bridge to remain intact just add the `--keep-mgmt-net` flag.
 
 #### all
 

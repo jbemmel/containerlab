@@ -41,3 +41,9 @@ tests/out
 **/*.y*ml.bak
 
 .python-version
+
+.devcontainer/private-*
+
+
+# readd test labDir files
+!clab/test_data/clab-*

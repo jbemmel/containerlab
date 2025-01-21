@@ -13,22 +13,26 @@ type clabNftablesRule struct {
 	rule *nftables.Rule
 }
 
-func (cnr *clabNftablesRule) AddOutputInterfaceFilter(oif string) {
+// AddInterfaceFilter adds an interface filter to the rule.
+func (cnr *clabNftablesRule) AddInterfaceFilter(rule definitions.FirewallRule) {
 	// define the metadata to evaluate
-	metaOifName := &expr.Meta{
-		Key:            expr.MetaKeyOIFNAME,
+	metaKey := directionMap[rule.Direction]
+
+	meta := &expr.Meta{
+		Key:            metaKey,
 		SourceRegister: false,
 		Register:       1,
 	}
+
 	// define the comparison
 	comp := &expr.Cmp{
 		Op:       expr.CmpOpEq,
 		Register: 1,
-		Data:     []byte(oif + "\x00"),
+		Data:     []byte(rule.Interface + "\x00"),
 	}
 
 	// add expr to rule
-	cnr.rule.Exprs = append(cnr.rule.Exprs, metaOifName, comp)
+	cnr.rule.Exprs = append(cnr.rule.Exprs, meta, comp)
 }
 
 func (cnr *clabNftablesRule) AddCounter() error {
@@ -57,7 +61,7 @@ func (cnr *clabNftablesRule) AddVerdictDrop() error {
 func (cnr *clabNftablesRule) AddComment(comment string) error {
 	// convert comment to byte
 	actualCommentByte := []byte(comment)
-	// check comment length not exceded
+	// check comment length
 	if len(actualCommentByte) > definitions.IPTablesCommentMaxSize {
 		return fmt.Errorf("comment max length is %d you've provided %d bytes",
 			definitions.IPTablesCommentMaxSize, len(actualCommentByte))

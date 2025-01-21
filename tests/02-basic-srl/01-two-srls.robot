@@ -133,20 +133,29 @@ Verify TLS works with JSON-RPC with skipping certificate check
 
 Verify TLS works with JSON-RPC and certificate check
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    curl --cacert ./clab-${lab-name}/.tls/ca/ca.pem 'https://admin:NokiaSrl1!@clab-${lab-name}-srl1/jsonrpc' -d '{"jsonrpc":"2.0","id":0,"method":"get","params":{"commands":[{"path":"/system/information/version","datastore":"state"}]}}'
+    ...    curl --cacert ${CURDIR}/clab-${lab-name}/.tls/ca/ca.pem 'https://admin:NokiaSrl1!@clab-${lab-name}-srl1/jsonrpc' -d '{"jsonrpc":"2.0","id":0,"method":"get","params":{"commands":[{"path":"/system/information/version","datastore":"state"}]}}'
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     Should Not Contain    ${output}    error
 
 Verify TLS works with JSON-RPC, certificate check and IP address as SAN
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    curl --cacert ./clab-${lab-name}/.tls/ca/ca.pem 'https://admin:NokiaSrl1!@172.20.20.200/jsonrpc' -d '{"jsonrpc":"2.0","id":0,"method":"get","params":{"commands":[{"path":"/system/information/version","datastore":"state"}]}}'
+    ...    curl --cacert ${CURDIR}/clab-${lab-name}/.tls/ca/ca.pem 'https://admin:NokiaSrl1!@172.20.20.200/jsonrpc' -d '{"jsonrpc":"2.0","id":0,"method":"get","params":{"commands":[{"path":"/system/information/version","datastore":"state"}]}}'
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     Should Not Contain    ${output}    error
+
+Verify NETCONF works
+    Skip If    '${runtime}' != 'docker'
+    ${rc}    ${output} =    Run And Return Rc And Output
+    ...    sudo docker run --name net-cons2-clab --rm --network clab ghcr.io/hellt/netconf-console2:3.0.1 --host clab-${lab-name}-srl1 --port 830 -u admin -p 'NokiaSrl1!' --hello
+    Log    ${output}
+    Should Be Equal As Integers    ${rc}    0
+    Should Contain    ${output}    base:1.1
 
 
 *** Keywords ***
 Cleanup
     Run    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file-name} --cleanup
+    Run    sudo docker rm -f net-cons2-clab
     Run    rm -f ${key-path}*

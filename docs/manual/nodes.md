@@ -138,9 +138,76 @@ topology:
 
 Check the particular kind documentation to see if the startup-config is supported and how it is applied.
 
+???info "Startup-config path variable"
+    By default, the startup-config references are either provided as an absolute or a relative (to the current working dir) path to the file to be used.
+
+    Consider a two-node lab `mylab.clab.yml` with seed configs that the user may wish to use in their lab. A user could create a directory for such files similar to this:
+
+    ```
+    .
+    ├── cfgs
+    │   ├── node1.partial.cfg
+    │   └── node2.partial.cfg
+    └── mylab.clab.yml
+
+    2 directories, 3 files
+    ```
+
+    Then to leverage these configs, the node could be configured with startup-config references like this:
+
+    ```yaml
+    name: mylab
+    topology:
+      nodes:
+        node1:
+          startup-config: cfgs/node1.partial.cfg
+        node2:
+          startup-config: cfgs/node2.partial.cfg
+    ```
+
+    while this configuration is correct, it might be considered verbose as the number of nodes grows. To remove this verbosity, the users can use a special variable `__clabNodeName__` in their startup-config paths. This variable will expand to the node-name for the parent node that the startup-config reference falls under.
+
+    ```yaml
+    name: mylab
+    topology:
+      nodes:
+        node1:
+          startup-config: cfg/__clabNodeName__.partial.cfg
+        node2:
+          startup-config: cfgs/__clabNodeName__.partial.cfg
+    ```
+
+    The `__clabNodeName__` variable can also be used in the kind and default sections of the config.  Using the same directory structure from the example above, the following shows how to use the magic variable for a kind.
+
+    ```yaml
+    name: mylab
+    topology:
+      defaults:
+        kind: nokia_srlinux
+      kinds:
+        nokia_srlinux:
+          startup-config: cfgs/__clabNodeName__.partial.cfg
+      nodes:
+        node1:
+        node2:
+    ``` 
+
+    The following example shows how one would do it using defaults.
+
+    ```yaml
+    name: mylab
+    topology:
+      defaults:
+        kind: nokia_srlinux
+        startup-config: cfgs/__clabNodeName__.partial.cfg
+      nodes:
+        node1:
+        node2:
+    ```
+
 #### embedded startup-config
 
-It is possible to embed the startup configuraion in the topology file itself. This is done by providing the startup-config as a multiline string.
+It is possible to embed the startup configuration in the topology file itself. This is done by providing the startup-config as a multiline string.
 
 ```yaml
 topology:
@@ -345,6 +412,18 @@ topology:
 
 You can also specify a magic ENV VAR - `__IMPORT_ENVS: true` - which will import all environment variables defined in your shell to the relevant topology level.
 
+/// admonition | `NO_PROXY` variable
+    type: subtle-note
+If you use an http(s) proxy on your host, you typically set the `NO_PROXY` environment variable in your containers to ensure that when containers talk to one another, they don't send traffic through the proxy, as that would lead to broken communication. And setting those env vars is tedious.
+
+Containerlab automates this process by automatically setting `NO_PROXY`/`no_proxy` environment variables in the containerlab nodes with the values of:
+
+1. `localhost,127.0.0.1,::1,*.local`
+2. management network range for v4 and v6 (e.g. `172.20.20.0/24`)
+3. IPv4/IPv6 management addresses of the nodes of the lab
+4. node names as stated in your topology file
+///
+
 ### env-files
 
 To add environment variables defined in a file use the `env-files` property that can be defined at `defaults`, `kind` and `node` levels.
@@ -498,24 +577,6 @@ topology:
           - foo.com
         options:
           - some-opt
-```
-
-### publish
-
-Container lab integrates with [border0.com](https://border0.com) service to allow for private, Internet-reachable tunnels created for ports of containerlab nodes. This enables effortless access sharing with customers/partners/colleagues.
-
-This integration is extensively covered on [Publish ports](published-ports.md) page.
-
-```yaml
-name: demo
-topology:
-  nodes:
-    r1:
-      kind: nokia_srlinux
-      publish:
-        - tcp/22     # tcp port 22 will be published
-        - tcp/57400  # tcp port 57400 will be published
-        - http/8080  # http port 8080 will be published
 ```
 
 ### network-mode

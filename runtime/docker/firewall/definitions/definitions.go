@@ -1,21 +1,36 @@
 package definitions
 
-import "errors"
+import (
+	"errors"
+)
 
-var ErrNotAvailabel = errors.New("not available")
+var ErrNotAvailable = errors.New("not available")
 
 const (
-	DockerFWUserChain = "DOCKER-USER"
-	DockerFWTable     = "filter"
+	DockerUserChain = "DOCKER-USER"
+	ForwardChain    = "FORWARD"
+	FilterTable     = "filter"
+	AcceptAction    = "ACCEPT"
+	InDirection     = "in"
+	OutDirection    = "out"
 
-	IPTablesRuleComment = "set by containerlab"
+	ContainerlabComment = "set by containerlab"
 
 	IPTablesCommentMaxSize = 256
 )
 
 // ClabFirewall is the interface that all firewall clients must implement.
 type ClabFirewall interface {
-	DeleteForwardingRules() error
-	InstallForwardingRules() error
+	DeleteForwardingRules(rule FirewallRule) error
+	InstallForwardingRules(rule FirewallRule) error
 	Name() string
+}
+
+type FirewallRule struct {
+	Chain     string
+	Table     string
+	Interface string
+	Direction string
+	Action    string
+	Comment   string
 }

@@ -42,6 +42,7 @@ var rootCmd = &cobra.Command{
 	Use:               "containerlab",
 	Short:             "deploy container based lab environments with a user-defined interconnections",
 	PersistentPreRunE: preRunFn,
+	Aliases:           []string{"clab"},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -101,7 +102,7 @@ func preRunFn(cmd *cobra.Command, _ []string) error {
 // Errors if more than one file is found by the glob path.
 func getTopoFilePath(cmd *cobra.Command) error {
 	// set commands which may use topo file find functionality, the rest don't need it
-	if !(cmd.Name() == "deploy" || cmd.Name() == "destroy" || cmd.Name() == "inspect" ||
+	if !(cmd.Name() == "deploy" || cmd.Name() == "destroy" || cmd.Name() == "redeploy" || cmd.Name() == "inspect" ||
 		cmd.Name() == "save" || cmd.Name() == "graph") {
 		return nil
 	}
@@ -139,11 +140,11 @@ func getTopoFilePath(cmd *cobra.Command) error {
 	files, err := filepath.Glob("*.clab.y*ml")
 
 	if len(files) == 0 {
-		return errors.New("no topology files matching the pattern *.clab.y*ml found")
+		return errors.New("no topology files matching the pattern *.clab.yml or *.clab.yaml found")
 	}
 
 	if len(files) > 1 {
-		return fmt.Errorf("more than one topology file matching the pattern *.clab.y*ml found, can't pick one: %q", files)
+		return fmt.Errorf("more than one topology file matching the pattern *.clab.yml or *.clab.yaml found, can't pick one: %q", files)
 	}
 
 	topo = files[0]

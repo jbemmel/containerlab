@@ -247,21 +247,44 @@ With this approach, users can prevent IP address overlap with nodes deployed on 
 
 #### external access
 
-Containerlab will attempt to enable external access to the nodes by default. This means that external systems/hosts will be able to communicate with the nodes of your topology without requiring any manual iptables/nftables rules to be installed.
+Containerlab will attempt to enable external management access to the nodes by default. This means that external systems/hosts will be able to communicate with the nodes of your topology without requiring any manual iptables/nftables rules to be installed.
 
-To allow external communications containerlab installs a rule in the `DOCKER-USER` chain, allowing all packets targeting containerlab's management network. The rule looks like follows:
+To allow external communications containerlab installs a rule in the `DOCKER-USER` chain for v4 and v6, allowing all packets targeting containerlab's management network. The rule looks like follows:
 
 ```shell
-❯ sudo iptables -vnL DOCKER-USER
-Chain DOCKER-USER (1 references)
- pkts bytes target     prot opt in     out     source               destination         
-    0     0 ACCEPT     all  --  *      br-a8b9fc8b33a2  0.0.0.0/0            0.0.0.0/0            /* set by containerlab */
-12719   79M RETURN     all  --  *      *       0.0.0.0/0            0.0.0.0/0      
+sudo iptables -vnL DOCKER-USER
 ```
 
-1. The `br-a8b9fc8b33a2` bridge interface is the interface that backs up the containerlab's management network (`clab` docker network).
+<div class="embed-result">
+```{.no-copy .no-select}
+Chain DOCKER-USER (1 references)
+ pkts bytes target     prot opt in     out     source               destination
+    0     0 ACCEPT     0    --  br-1351328e1855 *       0.0.0.0/0            0.0.0.0/0            /* set by containerlab */
+    0     0 ACCEPT     0    --  *      br-1351328e1855  0.0.0.0/0            0.0.0.0/0            /* set by containerlab */
+    0     0 RETURN     0    --  *      *       0.0.0.0/0            0.0.0.0/0
+```
+</div>
+
+1. The `br-1351328e1855` bridge interface is the interface that backs up the containerlab's management network (`clab` docker network).
 
 The rule will be removed together with the management network.
+
+///tip | RHEL 9 users
+By default RHEL 9 (and it's derivatives) will use `firewalld` as the [default firewall](https://access.redhat.com/solutions/7046655), containerlab's `iptables` and `nftables` rules will not work in this case and you will not have external access to your labs.
+
+To fix this you must disable `firewalld` and enable the `nftables` service.  
+
+**Take caution when disabling firewalls, you may be exposing things you shouldn't**
+
+```
+systemctl disable firewalld
+systemctl stop firewalld
+systemctl mask firewalld
+
+systemctl enable --now nftables
+```
+
+///
 
 Should you not want to enable external access to your nodes you can set `external-access` property to `false` under the management section of a topology:
 

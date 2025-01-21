@@ -33,8 +33,9 @@ const (
 	DefaultVethLinkMTU = 9500
 
 	// clab specific topology variables.
-	clabDirVar = "__clabDir__"
-	nodeDirVar = "__clabNodeDir__"
+	clabDirVar  = "__clabDir__"
+	nodeDirVar  = "__clabNodeDir__"
+	nodeNameVar = "__clabNodeName__"
 )
 
 // Config defines lab configuration as it is provided in the YAML file.
@@ -187,7 +188,6 @@ func (c *CLab) createNodeCfg(nodeName string, nodeDef *types.NodeDefinition, idx
 		NetworkMode:     strings.ToLower(c.Config.Topology.GetNodeNetworkMode(nodeName)),
 		MgmtIPv4Address: nodeDef.GetMgmtIPv4(),
 		MgmtIPv6Address: nodeDef.GetMgmtIPv6(),
-		Publish:         c.Config.Topology.GetNodePublish(nodeName),
 		Sysctls:         c.Config.Topology.GetSysCtl(nodeName),
 		Sandbox:         c.Config.Topology.GetNodeSandbox(nodeName),
 		Kernel:          c.Config.Topology.GetNodeKernel(nodeName),
@@ -211,14 +211,11 @@ func (c *CLab) createNodeCfg(nodeName string, nodeDef *types.NodeDefinition, idx
 		return nil, err
 	}
 
-	// Load content of the EnvVarFiles
-	envFileContent, err := utils.LoadEnvVarFiles(c.TopoPaths.TopologyFileDir(),
-		c.Config.Topology.GetNodeEnvFiles(nodeName))
+	// load environment variables
+	err = addEnvVarsToNodeCfg(c, nodeCfg)
 	if err != nil {
 		return nil, err
 	}
-	// Merge EnvVarFiles content and the existing env variable
-	nodeCfg.Env = utils.MergeStringMaps(envFileContent, nodeCfg.Env)
 
 	log.Debugf("node config: %+v", nodeCfg)
 
@@ -241,7 +238,7 @@ func (c *CLab) createNodeCfg(nodeName string, nodeDef *types.NodeDefinition, idx
 	if err != nil {
 		return nil, err
 	}
-	err = c.resolveBindPaths(binds, nodeCfg.LabDir)
+	err = c.resolveBindPaths(binds, nodeName)
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +252,8 @@ func (c *CLab) createNodeCfg(nodeName string, nodeDef *types.NodeDefinition, idx
 
 	nodeCfg.Config = c.Config.Topology.GetNodeConfigDispatcher(nodeCfg.ShortName)
 
+	c.processNodeExecs(nodeCfg)
+
 	return nodeCfg, nil
 }
 
@@ -262,8 +261,9 @@ func (c *CLab) createNodeCfg(nodeName string, nodeDef *types.NodeDefinition, idx
 // It handles remote files, local files and embedded configs.
 // Returns an absolute path to the startup-config file.
 func (c *CLab) processStartupConfig(nodeCfg *types.NodeConfig) error {
-	// process startup-config
-	p := c.Config.Topology.GetNodeStartupConfig(nodeCfg.ShortName)
+	// replace __clabNodeName__ magic var in startup-config path with node short name
+	r := c.magicVarReplacer(nodeCfg.ShortName)
+	p := r.Replace(c.Config.Topology.GetNodeStartupConfig(nodeCfg.ShortName))
 
 	// embedded config is a config that is defined as a multi-line string in the topology file
 	// it contains at least one newline
@@ -499,7 +499,12 @@ func (c *CLab) verifyContainersUniqueness(ctx context.Context) error {
 // it allows host path to have `~` and relative path to an absolute path
 // the list of binds will be changed in place.
 // if the host path doesn't exist, the error will be returned.
-func (c *CLab) resolveBindPaths(binds []string, nodedir string) error {
+func (c *CLab) resolveBindPaths(binds []string, nodeName string) error {
+	// checks are skipped when, for example, the destroy operation is run
+	if !c.checkBindsPaths {
+		return nil
+	}
+
 	for i := range binds {
 		// host path is a first element in a /hostpath:/remotepath(:options) string
 		elems := strings.Split(binds[i], ":")
@@ -509,8 +514,8 @@ func (c *CLab) resolveBindPaths(binds []string, nodedir string) error {
 			// volume, in this case we don't need to resolve the path
 			continue
 		}
-		// replace special variable
-		r := strings.NewReplacer(clabDirVar, c.TopoPaths.TopologyLabDir(), nodeDirVar, nodedir)
+		// replace special variables
+		r := c.magicVarReplacer(nodeName)
 		hp := r.Replace(elems[0])
 		hp = utils.ResolvePath(hp, c.TopoPaths.TopologyFileDir())
 
@@ -575,4 +580,94 @@ func labelsToEnvVars(n *types.NodeConfig) {
 		// add the value to the node env with a prefixed and special chars cleaned up key
 		n.Env["CLAB_LABEL_"+utils.ToEnvKey(k)] = v
 	}
+}
+
+// addEnvVarsToNodeCfg adds env vars that come from different sources to node config struct.
+func addEnvVarsToNodeCfg(c *CLab, nodeCfg *types.NodeConfig) error {
+	// Load content of the EnvVarFiles
+	envFileContent, err := utils.LoadEnvVarFiles(c.TopoPaths.TopologyFileDir(),
+		c.Config.Topology.GetNodeEnvFiles(nodeCfg.ShortName))
+	if err != nil {
+		return err
+	}
+	// Merge EnvVarFiles content and the existing env variable
+	nodeCfg.Env = utils.MergeStringMaps(envFileContent, nodeCfg.Env)
+
+	// Default set of no_proxy entries
+	noProxyDefaults := []string{"localhost", "127.0.0.1", "::1", "*.local"}
+
+	// check if either of the no_proxy variables exists
+	noProxyLower, existsLower := nodeCfg.Env["no_proxy"]
+	noProxyUpper, existsUpper := nodeCfg.Env["NO_PROXY"]
+	noProxy := ""
+	if existsLower {
+		noProxy = noProxyLower
+		for _, defaultValue := range noProxyDefaults {
+			if !strings.Contains(noProxy, defaultValue) {
+				noProxy = noProxy + "," + defaultValue
+			}
+		}
+	} else if existsUpper {
+		noProxy = noProxyUpper
+		for _, defaultValue := range noProxyDefaults {
+			if !strings.Contains(noProxy, defaultValue) {
+				noProxy = noProxy + "," + defaultValue
+			}
+		}
+	} else {
+		noProxy = strings.Join(noProxyDefaults, ",")
+	}
+
+	// add all clab nodes to the no_proxy variable, if they have a static IP assigned, add this as well
+	var noProxyList []string
+	for key := range c.Config.Topology.Nodes {
+		noProxyList = append(noProxyList, key)
+		ipv4address := c.Config.Topology.Nodes[key].GetMgmtIPv4()
+		if ipv4address != "" {
+			noProxyList = append(noProxyList, ipv4address)
+		}
+		ipv6address := c.Config.Topology.Nodes[key].GetMgmtIPv6()
+		if ipv6address != "" {
+			noProxyList = append(noProxyList, ipv6address)
+		}
+	}
+
+	// add mgmt subnet range for the sake of completeness - some OS support it, others don't
+	if c.Config.Mgmt.IPv4Subnet != "" {
+		noProxyList = append(noProxyList, c.Config.Mgmt.IPv4Subnet)
+	}
+	if c.Config.Mgmt.IPv6Subnet != "" {
+		noProxyList = append(noProxyList, c.Config.Mgmt.IPv6Subnet)
+	}
+
+	// sort for better readability
+	sort.Strings(noProxyList)
+
+	noProxy = noProxy + "," + strings.Join(noProxyList, ",")
+
+	nodeCfg.Env["no_proxy"] = noProxy
+	nodeCfg.Env["NO_PROXY"] = noProxy
+
+	return nil
+}
+
+// processNodeExecs replaces (in place) magic variables in node execs.
+func (c *CLab) processNodeExecs(nodeCfg *types.NodeConfig) {
+	for i, e := range nodeCfg.Exec {
+		r := c.magicVarReplacer(nodeCfg.ShortName)
+		nodeCfg.Exec[i] = r.Replace(e)
+	}
+}
+
+// magicVarReplacer returns a string replacer that replaces all supported magic variables.
+func (c *CLab) magicVarReplacer(nodeName string) *strings.Replacer {
+	if nodeName == "" {
+		return &strings.Replacer{}
+	}
+
+	return strings.NewReplacer(
+		clabDirVar, c.TopoPaths.TopologyLabDir(),
+		nodeDirVar, c.TopoPaths.NodeDir(nodeName),
+		nodeNameVar, nodeName,
+	)
 }

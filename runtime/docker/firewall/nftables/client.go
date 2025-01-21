@@ -15,25 +15,27 @@ import (
 
 const nfTables = "nf_tables"
 
+var directionMap = map[string]expr.MetaKey{
+	definitions.InDirection:  expr.MetaKeyIIFNAME,
+	definitions.OutDirection: expr.MetaKeyOIFNAME,
+}
+
+var afMap = map[nftables.TableFamily]string{
+	nftables.TableFamilyIPv4: "ipv4",
+	nftables.TableFamilyIPv6: "ipv6",
+}
+
 // NftablesClient is a client for nftables.
 type NftablesClient struct {
-	nftConn    *nftables.Conn
-	bridgeName string
+	nftConn *nftables.Conn
+	// is ip6_tables supported
+	ip6_tables bool
+	// is ip6 for docker supported
+	ip6_docker bool
 }
 
 // NewNftablesClient returns a new NftablesClient.
-func NewNftablesClient(bridgeName string) (*NftablesClient, error) {
-	loaded, err := utils.IsKernelModuleLoaded("nf_tables")
-	if err != nil {
-		return nil, err
-	}
-
-	if !loaded {
-		log.Debug("nf_tables kernel module not available")
-		// module is not loaded
-		return nil, definitions.ErrNotAvailabel
-	}
-
+func NewNftablesClient() (*NftablesClient, error) {
 	// setup netlink connection with nftables
 	nftConn, err := nftables.New(nftables.AsLasting())
 	if err != nil {
@@ -42,16 +44,31 @@ func NewNftablesClient(bridgeName string) (*NftablesClient, error) {
 
 	nftC := &NftablesClient{
 		nftConn:    nftConn,
-		bridgeName: bridgeName,
+		ip6_tables: false,
+		ip6_docker: false,
 	}
 
-	chains, err := nftC.getChains(definitions.DockerFWUserChain)
+	chain, err := nftC.getChain(definitions.ForwardChain, definitions.FilterTable, nftables.TableFamilyIPv4)
 	if err != nil {
 		return nil, err
 	}
-	if len(chains) == 0 {
-		log.Debugf("nftables does not seem to be in use, no %s chain found.", definitions.DockerFWUserChain)
-		return nil, definitions.ErrNotAvailabel
+	if chain == nil {
+		log.Debugf("nftables does not seem to be in use, no %s chain found.", definitions.DockerUserChain)
+		return nil, definitions.ErrNotAvailable
+	}
+
+	// check if ip6_tables is generally available
+	v6Chains, err := nftC.nftConn.ListChainsOfTableFamily(nftables.TableFamilyIPv6)
+	if err == nil && len(v6Chains) > 0 {
+		log.Debugf("nftables: ip6 address family generally supported")
+		nftC.ip6_tables = true
+	}
+
+	// check if ip6 docker-user chain is available
+	v6DockerChain, err := nftC.getChain(definitions.DockerUserChain, definitions.FilterTable, nftables.TableFamilyIPv6)
+	if err == nil && v6DockerChain != nil {
+		log.Debugf("nftables: ip6 docker is supported")
+		nftC.ip6_docker = true
 	}
 
 	return nftC, nil
@@ -62,23 +79,41 @@ func (*NftablesClient) Name() string {
 	return nfTables
 }
 
-// DeleteForwardingRules deletes the forwarding rules.
-func (c *NftablesClient) DeleteForwardingRules() error {
-	if c.bridgeName == "docker0" {
+// DeleteForwardingRules deletes the forwarding rules for in or out interface in a given chain.
+func (c *NftablesClient) DeleteForwardingRules(rule definitions.FirewallRule) error {
+	iface := rule.Interface
+	if iface == "docker0" {
 		log.Debug("skipping deletion of iptables forwarding rule for non-bridged or default management network")
 		return nil
 	}
 
-	// first check if a rule already exists to not create duplicates
 	defer c.close()
 
-	rules, err := c.getRules(definitions.DockerFWUserChain, definitions.DockerFWTable, nftables.TableFamilyIPv4)
+	allRules, err := c.getRules(rule.Chain, rule.Table, nftables.TableFamilyIPv4)
 	if err != nil {
 		return fmt.Errorf("%w. See http://containerlab.dev/manual/network/#external-access", err)
 	}
 
-	mgmtBrRules := c.getRulesForMgmtBr(c.bridgeName, rules)
-	if len(mgmtBrRules) == 0 {
+	if c.ip6_tables && rule.Chain == definitions.ForwardChain {
+		v6rules, err := c.getRules(rule.Chain, rule.Table, nftables.TableFamilyIPv6)
+		if err != nil {
+			return fmt.Errorf("failed to get iptables rules for chain %s, table %s, family %s: %w",
+				rule.Chain, rule.Table, afMap[nftables.TableFamilyIPv6], err)
+		}
+		allRules = append(allRules, v6rules...)
+	}
+
+	if c.ip6_docker && rule.Chain == definitions.DockerUserChain {
+		v6rules, err := c.getRules(rule.Chain, rule.Table, nftables.TableFamilyIPv6)
+		if err != nil {
+			return fmt.Errorf("failed to get iptables rules for chain %s, table %s, family %s: %w",
+				rule.Chain, rule.Table, afMap[nftables.TableFamilyIPv6], err)
+		}
+		allRules = append(allRules, v6rules...)
+	}
+
+	clabRules := c.getClabRulesForInterface(iface, allRules)
+	if len(clabRules) == 0 {
 		log.Debug("external access iptables rule doesn't exist. Skipping deletion")
 		return nil
 	}
@@ -86,128 +121,151 @@ func (c *NftablesClient) DeleteForwardingRules() error {
 	// we are not deleting the rule if the bridge still exists
 	// it happens when bridge is either still in use by docker network
 	// or it is managed externally (created manually)
-	_, err = utils.BridgeByName(c.bridgeName)
+	_, err = utils.BridgeByName(rule.Interface)
 	if err == nil {
-		log.Debugf("bridge %s is still in use, not removing the forwarding rule", c.bridgeName)
+		log.Debugf("bridge %s is still in use, not removing the forwarding rule", iface)
 		return nil
 	}
 
-	log.Debugf("removing clab iptables rules for bridge %q", c.bridgeName)
-	for _, r := range mgmtBrRules {
-		c.deleteRule(r)
+	log.Debugf("removing clab iptables rules for bridge %q", iface)
+	for _, r := range clabRules {
+		err := c.deleteRule(r)
+		if err != nil {
+			log.Warnf("failed to delete rule: %v", err)
+		}
 	}
 
 	c.flush()
 	return nil
 }
 
-// InstallForwardingRules installs the forwarding rules.
-func (c *NftablesClient) InstallForwardingRules() error {
+// InstallForwardingRules installs the firewall `rule` for v4 and v6 address families.
+func (c *NftablesClient) InstallForwardingRules(rule definitions.FirewallRule) error {
 	defer c.close()
 
-	rules, err := c.getRules(definitions.DockerFWUserChain, definitions.DockerFWTable, nftables.TableFamilyIPv4)
+	err := c.InstallForwardingRulesForAF(nftables.TableFamilyIPv4, rule)
+	if err != nil {
+		return err
+	}
+
+	if !c.ip6_tables && rule.Chain == definitions.ForwardChain {
+		log.Debug("ip6_tables is not supported, skipping installation of ip6 forwarding rules")
+		return nil
+	}
+
+	if !c.ip6_docker && rule.Chain == definitions.DockerUserChain {
+		log.Debug("ip6_tables is not supported by docker, skipping installation of ip6 forwarding rules")
+		return nil
+	}
+
+	// now it is safe to install the ip6 rules
+	return c.InstallForwardingRulesForAF(nftables.TableFamilyIPv6, rule)
+}
+
+// InstallForwardingRulesForAF installs the forwarding rules for the specified address family
+// input interface and chain.
+func (c *NftablesClient) InstallForwardingRulesForAF(af nftables.TableFamily, rule definitions.FirewallRule) error {
+	iface := rule.Interface
+
+	rules, err := c.getRules(rule.Chain, rule.Table, af)
 	if err != nil {
 		return fmt.Errorf("%w. See http://containerlab.dev/manual/network/#external-access", err)
 	}
 
-	if c.allowRuleForMgmtBrExists(c.bridgeName, rules) {
-		log.Debugf("found iptables forwarding rule targeting the bridge %q. Skipping creation of the forwarding rule.", c.bridgeName)
+	if c.ruleExists(rule, rules) {
+		log.Debugf("found allowing iptables forwarding rule targeting the bridge %q in the direction %s. Skipping creation of the forwarding rule.", iface, rule.Direction)
 		return nil
 	}
 
-	log.Debugf("Installing iptables rules for bridge %q", c.bridgeName)
+	log.Debugf("Installing iptables rules for interface %q, direction %s, family %s", iface, rule.Direction, afMap[af])
 
 	// create a new rule
-	rule, err := c.newClabNftablesRule(definitions.DockerFWUserChain, definitions.DockerFWTable, nftables.TableFamilyIPv4, 0)
+	r, err := c.newClabNftablesRule(rule.Chain, rule.Table, af, 0)
 	if err != nil {
 		return err
 	}
-	// set Output interface match
-	rule.AddOutputInterfaceFilter(c.bridgeName)
+	// set interface match
+	r.AddInterfaceFilter(rule)
 
 	// add a comment
-	err = rule.AddComment(definitions.IPTablesRuleComment)
+	err = r.AddComment(rule.Comment)
 	if err != nil {
 		return err
 	}
 	// add a counter
-	err = rule.AddCounter()
+	err = r.AddCounter()
 	if err != nil {
 		return err
 	}
 	// make it an ACCEPT rule
-	err = rule.AddVerdictAccept()
+	err = r.AddVerdictAccept()
 	if err != nil {
 		return err
 	}
 	// mark and note for installation
-	c.insertRule(rule.rule)
+	c.insertRule(r.rule)
 	// flush changes out to nftables
 	c.flush()
 
 	return nil
 }
 
-func (nftC *NftablesClient) getChains(name string) ([]*nftables.Chain, error) {
-	var result []*nftables.Chain
-
-	chains, err := nftC.nftConn.ListChains()
+// getChain returns a chain for the provided name, table name and family.
+func (nftC *NftablesClient) getChain(name, table string, family nftables.TableFamily) (*nftables.Chain, error) {
+	chains, err := nftC.nftConn.ListChainsOfTableFamily(family)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, c := range chains {
-		if c.Name == name {
-			result = append(result, c)
+		if c.Name == name && c.Table.Name == table {
+			return c, nil
 		}
 	}
-	return result, nil
+
+	return nil, nil
 }
 
-func (nftC *NftablesClient) deleteRule(r *nftables.Rule) {
-	nftC.nftConn.DelRule(r)
+func (nftC *NftablesClient) deleteRule(r *nftables.Rule) error {
+	return nftC.nftConn.DelRule(r)
 }
 
 // getRules returns all rules for the provided chain name, table name and family.
 func (nftC *NftablesClient) getRules(chainName, tableName string, family nftables.TableFamily) ([]*nftables.Rule, error) {
-	// get chain reference
-	chains, err := nftC.getChains(chainName)
+	chain, err := nftC.getChain(chainName, tableName, family)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, c := range chains {
-		if c.Table.Name == tableName && c.Table.Family == family {
-			return nftC.nftConn.GetRules(c.Table, c)
-		}
+	if chain == nil {
+		return nil, fmt.Errorf("no match for chain %q, table %q with family %q found", chainName, tableName, family)
 	}
 
-	return nil, fmt.Errorf("no match for chain %q, table %q with family %q found", chainName, tableName, family)
+	return nftC.nftConn.GetRules(chain.Table, chain)
+
 }
 
 func (nftC *NftablesClient) newClabNftablesRule(chainName, tableName string,
 	family nftables.TableFamily, position uint64,
 ) (*clabNftablesRule, error) {
-	chains, err := nftC.getChains(chainName)
+	chain, err := nftC.getChain(chainName, tableName, family)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, c := range chains {
-		if c.Table.Name == tableName && c.Table.Family == family {
-			r := &nftables.Rule{
-				Handle:   0,
-				Position: position,
-				Table:    c.Table,
-				Chain:    c,
-				Exprs:    []expr.Any{},
-			}
-
-			return &clabNftablesRule{rule: r}, nil
-		}
+	if chain == nil {
+		return nil, errors.New("chain " + chainName + " not found in table " + tableName + " with family " + string(family))
 	}
 
-	return nil, errors.New("chain " + chainName + " not found in table " + tableName + " with family " + string(family))
+	r := &nftables.Rule{
+		Handle:   0,
+		Position: position,
+		Table:    chain.Table,
+		Chain:    chain,
+		Exprs:    []expr.Any{},
+	}
+
+	return &clabNftablesRule{rule: r}, nil
 }
 
 // InsertRule inserts a rule.
@@ -225,30 +283,65 @@ func (nftC *NftablesClient) close() {
 	nftC.nftConn.CloseLasting()
 }
 
-// allowRuleForMgmtBrExists checks if an allow rule for the provided bridge name exists.
-// The actual check doesn't verify that `allow` is set, it just checks if the rule
-// has the provided bridge name in the output interface match and has a comment that is setup
-// by containerlab.
-func (nftC *NftablesClient) allowRuleForMgmtBrExists(brName string, rules []*nftables.Rule) bool {
-	return len(nftC.getRulesForMgmtBr(brName, rules)) > 0
+// ruleExists checks if a `rule` exists in the list of fetched `rules`.
+// We check if the interface name, direction, action and comment match.
+func (nftC *NftablesClient) ruleExists(rule definitions.FirewallRule, rules []*nftables.Rule) bool {
+	for _, nfRule := range rules {
+		nameMatch := false
+		commentMatch := false
+		actionMatch := false
+		directionMatch := false
+
+		for _, e := range nfRule.Exprs {
+			switch v := e.(type) {
+			case *expr.Meta:
+				if v.Key == directionMap[rule.Direction] {
+					directionMatch = true
+				}
+			case *expr.Cmp:
+				if (string(v.Data) == rule.Interface+"\x00") && (v.Op == expr.CmpOpEq) {
+					nameMatch = true
+				}
+			case *expr.Match:
+				if v.Name == "comment" {
+					if val, ok := v.Info.(*xt.Unknown); ok {
+						if bytes.HasPrefix(*val, []byte(definitions.ContainerlabComment)) {
+							commentMatch = true
+						}
+					}
+				}
+			case *expr.Verdict:
+				if v.Kind == expr.VerdictAccept {
+					actionMatch = true
+				}
+			}
+		}
+
+		if nameMatch && commentMatch && actionMatch && directionMatch {
+			return true
+		}
+
+	}
+
+	return false
 }
 
-// getRulesForMgmtBr returns all rules that have the provided bridge name in the output interface match
-// and have a comment that is setup by containerlab.
-func (*NftablesClient) getRulesForMgmtBr(brName string, rules []*nftables.Rule) []*nftables.Rule {
+// getClabRulesForInterface returns rules that have the provided interface name (regardless in which direction)
+// with a comment that is setup by containerlab from the list of `rules`.
+func (*NftablesClient) getClabRulesForInterface(iface string, rules []*nftables.Rule) []*nftables.Rule {
 	var result []*nftables.Rule
 
 	for _, r := range rules {
-		oifNameFound := false
-		commentFound := false
+		ifaceMatch := false
+		commentMatch := false
 
 		for _, e := range r.Exprs {
 			switch v := e.(type) {
 			// Cmp is a comparison expression
 			// in the case of the rule we are looking for, it should be a comparison of the output interface name
 			case *expr.Cmp:
-				if bytes.Equal(v.Data, []byte(brName+"\x00")) {
-					oifNameFound = true
+				if string(v.Data) == iface+"\x00" {
+					ifaceMatch = true
 				}
 			// Match is a match expression
 			// in the case of the rule we are looking for, it should contain
@@ -256,8 +349,8 @@ func (*NftablesClient) getRulesForMgmtBr(brName string, rules []*nftables.Rule) 
 			case *expr.Match:
 				if v.Name == "comment" {
 					if val, ok := v.Info.(*xt.Unknown); ok {
-						if bytes.HasPrefix(*val, []byte(definitions.IPTablesRuleComment)) {
-							commentFound = true
+						if bytes.HasPrefix(*val, []byte(definitions.ContainerlabComment)) {
+							commentMatch = true
 						}
 					}
 				}
@@ -266,7 +359,7 @@ func (*NftablesClient) getRulesForMgmtBr(brName string, rules []*nftables.Rule) 
 			}
 		}
 
-		if oifNameFound && commentFound {
+		if ifaceMatch && commentMatch {
 			result = append(result, r)
 		}
 	}

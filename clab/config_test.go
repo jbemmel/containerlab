@@ -24,21 +24,6 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-func setupTestCase(t *testing.T) func(t *testing.T) {
-	// setup function
-	// create node' labdir with a file that is used in topo2 definition for binds resolver to check path existence
-	f, _ := filepath.Abs("clab-topo2/node1/somefile")
-	os.MkdirAll("clab-topo2/node1", 0777) // skipcq: GSC-G301
-
-	if _, err := os.Create(f); err != nil {
-		t.Error(err)
-	}
-	// teardown function
-	return func(t *testing.T) {
-		os.RemoveAll("clab-topo2")
-	}
-}
-
 func TestLicenseInit(t *testing.T) {
 	tests := map[string]struct {
 		got  string
@@ -61,9 +46,6 @@ func TestLicenseInit(t *testing.T) {
 			want: "node1.lic",
 		},
 	}
-
-	teardownTestCase := setupTestCase(t)
-	defer teardownTestCase(t)
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -96,7 +78,7 @@ func TestBindsInit(t *testing.T) {
 			want: []string{
 				"node1.lic:/dst1",
 				"kind.lic:/dst2",
-				"${PWD}/clab-topo2/node1/somefile:/somefile",
+				"${PWD}/test_data/clab-topo2/node1/node1:/somefile",
 			},
 		},
 		"kind_and_node_binds": {
@@ -112,9 +94,6 @@ func TestBindsInit(t *testing.T) {
 			want: []string{"node1.lic:/dst1", "kind.lic:/dst2", "default.lic:/dst3"},
 		},
 	}
-
-	teardownTestCase := setupTestCase(t)
-	defer teardownTestCase(t)
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -173,9 +152,6 @@ func TestTypeInit(t *testing.T) {
 			want: "ixrd2l",
 		},
 	}
-
-	teardownTestCase := setupTestCase(t)
-	defer teardownTestCase(t)
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -250,9 +226,6 @@ func TestEnvInit(t *testing.T) {
 		},
 	}
 
-	teardownTestCase := setupTestCase(t)
-	defer teardownTestCase(t)
-
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			for k, v := range tc.envvar {
@@ -307,9 +280,6 @@ func TestUserInit(t *testing.T) {
 		},
 	}
 
-	teardownTestCase := setupTestCase(t)
-	defer teardownTestCase(t)
-
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
@@ -346,9 +316,6 @@ func TestVerifyLinks(t *testing.T) {
 		},
 	}
 
-	teardownTestCase := setupTestCase(t)
-	defer teardownTestCase(t)
-
 	ctx := context.Background()
 
 	for name, tc := range tests {
@@ -382,6 +349,10 @@ func TestVerifyLinks(t *testing.T) {
 }
 
 func TestLabelsInit(t *testing.T) {
+	owner := os.Getenv("SUDO_USER")
+	if owner == "" {
+		owner = os.Getenv("USER")
+	}
 	tests := map[string]struct {
 		got  string
 		node string
@@ -396,9 +367,9 @@ func TestLabelsInit(t *testing.T) {
 				labels.NodeKind:     "nokia_srlinux",
 				labels.NodeType:     "ixrd2l",
 				labels.NodeGroup:    "",
-				labels.NodeLabDir:   "../clab-topo1/node1",
+				labels.NodeLabDir:   "./clab-topo1/node1",
 				labels.TopoFile:     "topo1.yml",
-				labels.Owner:        "runner",
+				labels.Owner:        owner,
 			},
 		},
 		"custom_node_label": {
@@ -410,10 +381,10 @@ func TestLabelsInit(t *testing.T) {
 				labels.NodeKind:     "nokia_srlinux",
 				labels.NodeType:     "ixrd2l",
 				labels.NodeGroup:    "",
-				labels.NodeLabDir:   "../clab-topo1/node2",
+				labels.NodeLabDir:   "./clab-topo1/node2",
 				labels.TopoFile:     "topo1.yml",
 				"node-label":        "value",
-				labels.Owner:        "runner",
+				labels.Owner:        owner,
 			},
 		},
 		"custom_kind_label": {
@@ -425,10 +396,10 @@ func TestLabelsInit(t *testing.T) {
 				labels.NodeKind:     "nokia_srlinux",
 				labels.NodeType:     "ixrd2l",
 				labels.NodeGroup:    "",
-				labels.NodeLabDir:   "../clab-topo2/node1",
+				labels.NodeLabDir:   "./clab-topo2/node1",
 				labels.TopoFile:     "topo2.yml",
 				"kind-label":        "value",
-				labels.Owner:        "runner",
+				labels.Owner:        owner,
 			},
 		},
 		"custom_default_label": {
@@ -440,16 +411,13 @@ func TestLabelsInit(t *testing.T) {
 				labels.NodeKind:     "nokia_srlinux",
 				labels.NodeType:     "ixrd2l",
 				labels.NodeGroup:    "",
-				labels.NodeLabDir:   "../clab-topo3/node2",
+				labels.NodeLabDir:   "./clab-topo3/node2",
 				labels.TopoFile:     "topo3.yml",
 				"default-label":     "value",
-				labels.Owner:        "runner",
+				labels.Owner:        owner,
 			},
 		},
 	}
-
-	teardownTestCase := setupTestCase(t)
-	defer teardownTestCase(t)
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -663,9 +631,6 @@ func TestEnvFileInit(t *testing.T) {
 		},
 	}
 
-	teardownTestCase := setupTestCase(t)
-	defer teardownTestCase(t)
-
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			opts := []ClabOption{
@@ -727,6 +692,81 @@ func TestSuppressConfigInit(t *testing.T) {
 			suppress := c.Nodes[tc.node].Config().SuppressStartupConfig
 			if suppress != tc.want {
 				t.Fatalf("wanted %v, got %v", tc.want, suppress)
+			}
+		})
+	}
+}
+
+func TestStartupConfigInit(t *testing.T) {
+	tests := map[string]struct {
+		got  string
+		node string
+		want string
+	}{
+		"kinds_startup": {
+			got:  "test_data/topo13.yml",
+			node: "node1",
+			want: "/test_data/configs/fabric/node1.cfg",
+		},
+		"node_startup": {
+			got:  "test_data/topo14.yml",
+			node: "node1",
+			want: "/test_data/configs/fabric/node1.cfg",
+		},
+		"default_startup": {
+			got:  "test_data/topo15.yml",
+			node: "node1",
+			want: "/test_data/configs/fabric/node1.cfg",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			opts := []ClabOption{
+				WithTopoPath(tc.got, ""),
+			}
+			c, err := NewContainerLab(opts...)
+			if err != nil {
+				t.Error(err)
+			}
+
+			cwd, _ := os.Getwd()
+			if c.Nodes[tc.node].Config().StartupConfig != filepath.Join(cwd, tc.want) {
+				t.Errorf("want startup-config %q got startup-config %q",
+					filepath.Join(cwd, tc.want), c.Nodes[tc.node].Config().StartupConfig)
+			}
+		})
+	}
+}
+
+func TestExecInit(t *testing.T) {
+	tests := map[string]struct {
+		got  string
+		node string
+		want []string
+	}{
+		"node_exec": {
+			got:  "test_data/topo14.yml",
+			node: "node1",
+			want: []string{
+				"echo \"Hello world\"",
+				"echo \"Hello node node1\"",
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			opts := []ClabOption{
+				WithTopoPath(tc.got, ""),
+			}
+			c, err := NewContainerLab(opts...)
+			if err != nil {
+				t.Error(err)
+			}
+
+			if d := cmp.Diff(c.Nodes[tc.node].Config().Exec, tc.want); d != "" {
+				t.Errorf("execs do not match %s", d)
 			}
 		})
 	}

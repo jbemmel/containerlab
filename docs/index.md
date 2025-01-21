@@ -2,7 +2,7 @@
 hide:
   - navigation
 ---
-<p align=center><object type="image/svg+xml" data=https://cdn.jsdelivr.net/gh/srl-labs/containerlab@main/docs/images/containerlab_export_white_ink_js.svg ></object></p>
+<p align=center><a href="https://containerlab.dev"><img src=images/containerlab_export_white_ink.svg?sanitize=true/></a></p>
 
 [![github release](https://img.shields.io/github/release/srl-labs/containerlab.svg?style=flat-square&color=00c9ff&labelColor=bec8d2)](https://github.com/srl-labs/containerlab/releases/)
 [![Github all releases](https://img.shields.io/github/downloads/srl-labs/containerlab/total.svg?style=flat-square&color=00c9ff&labelColor=bec8d2)](https://github.com/srl-labs/containerlab/releases/)
@@ -73,7 +73,7 @@ This short clip briefly demonstrates containerlab features and explains its purp
 
 ## Features
 
-* **IaaC approach**  
+* **Lab as Code (IaC) approach**  
     Declarative way of defining the labs by means of the topology definition [`clab` files](manual/topo-def-file.md).
 * **Network Operating Systems centric**  
     Focus on containerized Network Operating Systems. The sophisticated startup requirements of various NOS containers are abstracted with [kinds](manual/kinds/index.md) which allows the user to focus on the use cases, rather than infrastructure hurdles.
@@ -101,7 +101,7 @@ This short clip briefly demonstrates containerlab features and explains its purp
 * **Labs and demos**  
     Containerlab was meant to be a tool for provisioning networking labs built with containers. It is free, open and ubiquitous. No software apart from Docker is required!
     As with any lab environment it allows the users to validate features, topologies, perform interop testing, datapath testing, etc.
-    It is also a perfect companion for your next demo. Deploy the lab fast, with all its configuration stored as a code -> destroy when done. Easily and [securely share lab access](manual/published-ports.md) if needed.
+    It is also a perfect companion for your next demo. Deploy the lab fast, with all its configuration stored as a code -> destroy when done.
 * **Testing and CI**  
     Because of the containerlab's single-binary packaging and code-based lab definition files, it was never that easy to spin up a test bed for CI. Gitlab CI, Github Actions and virtually any CI system will be able to spin up containerlab topologies in a single simple command.
 * **Telemetry validation**  

@@ -70,7 +70,8 @@ func destroyFn(_ *cobra.Command, _ []string) error {
 			return nil
 		}
 
-		topos[topo] = filepath.Dir(cnts[0].Labels[labels.NodeLabDir])
+		topos[cnts[0].Labels[labels.TopoFile]] =
+			filepath.Dir(cnts[0].Labels[labels.NodeLabDir])
 
 	case all:
 		containers, err := listContainers(ctx, topo)
@@ -102,6 +103,9 @@ func destroyFn(_ *cobra.Command, _ []string) error {
 				},
 			),
 			clab.WithDebug(debug),
+			// during destroy we don't want to check bind paths
+			// as it is irrelevant for this command.
+			clab.WithSkippedBindsPathsCheck(),
 		}
 
 		if keepMgmtNet {
@@ -123,7 +127,7 @@ func destroyFn(_ *cobra.Command, _ []string) error {
 			}
 		}
 
-		err = links.SetMgmtNetUnderlayingBridge(nc.Config.Mgmt.Bridge)
+		err = links.SetMgmtNetUnderlyingBridge(nc.Config.Mgmt.Bridge)
 		if err != nil {
 			return err
 		}
@@ -182,6 +186,9 @@ func listContainers(ctx context.Context, topo string) ([]runtime.GenericContaine
 	opts := []clab.ClabOption{
 		clab.WithRuntime(rt, runtimeConfig),
 		clab.WithTimeout(timeout),
+		// when listing containers we don't care if binds are accurate
+		// since this function is used in the destroy process
+		clab.WithSkippedBindsPathsCheck(),
 	}
 
 	// filter to list all containerlab containers
