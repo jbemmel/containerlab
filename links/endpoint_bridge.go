@@ -27,15 +27,20 @@ func (e *EndpointBridge) Verify(ctx context.Context, p *VerifyLinkParams) error 
 	if err != nil {
 		errs = append(errs, err)
 	}
-	if p.RunBridgeExistsCheck {
+	// if the BridgeExists check is disabled by config and it is not a Bridge in an Namespace, run
+	// the check
+	if p.RunBridgeExistsCheck && e.Node.GetLinkEndpointType() != LinkEndpointTypeBridgeNS {
 		err = CheckBridgeExists(ctx, e.GetNode())
 		if err != nil {
 			errs = append(errs, err)
 		}
 	}
-	err = CheckEndpointDoesNotExistYet(ctx, e)
-	if err != nil {
-		errs = append(errs, err)
+	// if it is supposed to be a bridge in a Namespace, the if exists check is to be skipped.
+	if e.Node.GetLinkEndpointType() != LinkEndpointTypeBridgeNS {
+		err = CheckEndpointDoesNotExistYet(ctx, e)
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
@@ -61,11 +66,18 @@ func CheckBridgeExists(ctx context.Context, n Node) error {
 		_, notfound := err.(netlink.LinkNotFoundError)
 		switch {
 		case notfound:
-			return fmt.Errorf("bridge %q referenced in topology but does not exist", n.GetShortName())
+			return fmt.Errorf(
+				"bridge %q referenced in topology but does not exist",
+				n.GetShortName(),
+			)
 		case err != nil:
 			return err
 		case br.Type() != "bridge" && br.Type() != "openvswitch":
-			return fmt.Errorf("interface %s found. expected type \"bridge\" or \"openvswitch\", actual is %q", n.GetShortName(), br.Type())
+			return fmt.Errorf(
+				"interface %s found. expected type \"bridge\" or \"openvswitch\", actual is %q",
+				n.GetShortName(),
+				br.Type(),
+			)
 		}
 		return nil
 	})

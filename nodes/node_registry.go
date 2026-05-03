@@ -21,7 +21,11 @@ func NewNodeRegistry() *NodeRegistry {
 }
 
 // Register registers the node' init function for all provided names.
-func (r *NodeRegistry) Register(names []string, initf Initializer, attributes *NodeRegistryEntryAttributes) error {
+func (r *NodeRegistry) Register(
+	names []string,
+	initf Initializer,
+	attributes *NodeRegistryEntryAttributes,
+) error {
 	newEntry := newRegistryEntry(names, initf, attributes)
 	return r.addEntry(newEntry)
 }
@@ -44,14 +48,19 @@ func (r *NodeRegistry) NewNodeOfKind(nodeKindName string) (Node, error) {
 	nodeKindEntry, ok := r.nodeIndex[nodeKindName]
 	if !ok {
 		registeredKinds := strings.Join(r.GetRegisteredNodeKindNames(), ", ")
-		return nil, fmt.Errorf("kind %q is not supported. Supported kinds are %q", nodeKindName, registeredKinds)
+		return nil, fmt.Errorf(
+			"kind %q is not supported. Supported kinds are %q",
+			nodeKindName,
+			registeredKinds,
+		)
 	}
 
 	// return a new instance of the requested node
 	return nodeKindEntry.initFunction(), nil
 }
 
-// GetRegisteredNodeKindNames returns a sorted slice of all the registered node kind names in the registry.
+// GetRegisteredNodeKindNames returns a sorted slice of all the registered node kind names in the
+// registry.
 func (r *NodeRegistry) GetRegisteredNodeKindNames() []string {
 	var result []string
 	for k := range r.nodeIndex {
@@ -89,11 +98,25 @@ func (nre *NodeRegistryEntry) GetCredentials() *Credentials {
 	return nre.attributes.GetCredentials()
 }
 
+type NodeRegistryEntryAttributes struct {
+	credentials        *Credentials
+	generateAttributes *GenerateNodeAttributes
+	platformAttrs      *PlatformAttrs
+}
+
 func (nre *NodeRegistryEntry) GetGenerateAttributes() *GenerateNodeAttributes {
 	if nre.attributes == nil {
 		return nil
 	}
 	return nre.attributes.generateAttributes
+}
+
+func (nre *NodeRegistryEntry) PlatformAttrs() *PlatformAttrs {
+	if nre.attributes == nil {
+		return nil
+	}
+
+	return nre.attributes.PlatformAttrs()
 }
 
 // Credentials returns entry's credentials.
@@ -116,12 +139,20 @@ func newRegistryEntry(nodeKindNames []string, initFunction Initializer,
 	}
 }
 
-type NodeRegistryEntryAttributes struct {
-	credentials        *Credentials
-	generateAttributes *GenerateNodeAttributes
+// PlatformAttrs contains the platform attributes this node/platform is known to have in different
+// libraries and tools.
+// Most often just the platform/provider name.
+type PlatformAttrs struct {
+	ScrapliPlatformName string
+	NapalmPlatformName  string
 }
 
-func NewNodeRegistryEntryAttributes(c *Credentials, ga *GenerateNodeAttributes) *NodeRegistryEntryAttributes {
+// NewNodeRegistryEntryAttributes creates a new NodeRegistryEntryAttributes.
+func NewNodeRegistryEntryAttributes(
+	c *Credentials,
+	ga *GenerateNodeAttributes,
+	pa *PlatformAttrs,
+) *NodeRegistryEntryAttributes {
 	// set default value for GenerateNodeAttributes
 	if ga == nil {
 		ga = NewGenerateNodeAttributes(false, "")
@@ -129,6 +160,7 @@ func NewNodeRegistryEntryAttributes(c *Credentials, ga *GenerateNodeAttributes) 
 	return &NodeRegistryEntryAttributes{
 		credentials:        c,
 		generateAttributes: ga,
+		platformAttrs:      pa,
 	}
 }
 
@@ -138,6 +170,15 @@ func (nrea *NodeRegistryEntryAttributes) GetCredentials() *Credentials {
 
 func (nrea *NodeRegistryEntryAttributes) GetGenerateAttributes() *GenerateNodeAttributes {
 	return nrea.generateAttributes
+}
+
+// PlatformAttrs returns the platform attributes of this node's registry attributes.
+func (nrea *NodeRegistryEntryAttributes) PlatformAttrs() *PlatformAttrs {
+	if nrea == nil {
+		return nil
+	}
+
+	return nrea.platformAttrs
 }
 
 type GenerateNodeAttributes struct {

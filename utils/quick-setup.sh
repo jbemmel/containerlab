@@ -1,22 +1,36 @@
 DISTRO_TYPE=""
 SETUP_SSHD="${SETUP_SSHD:-true}"
+CLAB_ADMINS="${CLAB_ADMINS:-true}"
 
 # Docker version that will be installed by this install script.
-DOCKER_VERSION="26.1.4"
+DOCKER_VERSION="27.5.1"
+
+# Containerlab version to install. If not set, the latest version is installed.
+# The version should be provided without the 'v' prefix, e.g., "0.72.0"
+CLAB_VERSION="${CLAB_VERSION:-}"
 
 function check_os {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         if [ "$ID" = "debian" ]; then
             DISTRO_TYPE="debian"
+            if [ "$VERSION_ID" = "13" ]; then
+                DOCKER_VERSION="28.5.2"
+            fi
         elif [ "$ID" = "ubuntu" ]; then
             DISTRO_TYPE="ubuntu"
+            if [ "$VERSION_ID" = "25.04" ] || [ "$VERSION_ID" = "25.10" ]; then
+                DOCKER_VERSION="28.5.2"
+            fi
         elif [ "$ID" = "fedora" ]; then
             DISTRO_TYPE="fedora"
-        elif [[ "$ID" = "rocky" || "$ID" = "rhel" || "$ID" = "centos" ]]; then
+        elif [[ "$ID" = "rocky" || "$ID" = "rhel" || "$ID" = "centos" || "$ID" = "almalinux" ]]; then
             DISTRO_TYPE="rhel"
+            if [[ "$ID" = "rocky" ]] && [ "${VERSION_ID:0:2}" = "10" ]; then
+                DOCKER_VERSION="28.5.2"
+            fi
         else
-            echo "This is not a supported OS. (Debian, Ubuntu, Fedora, Rocky, CentOS, RHEL)"
+            echo "This is not a supported OS. (Debian, Ubuntu, Fedora, Rocky, CentOS, RHEL, AlmaLinux)"
         fi
     else
         echo "Cannot determine the operating system"
@@ -50,7 +64,7 @@ function install-docker-debian {
     sudo apt-get update -y
     sudo apt-get install -y ca-certificates curl
     sudo install -m 0755 -d /etc/apt/keyrings
-    sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    sudo -E curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
     sudo chmod a+r /etc/apt/keyrings/docker.asc
 
     # Add the repository to Apt sources:
@@ -74,7 +88,7 @@ function install-docker-ubuntu {
     sudo apt-get update -y
     sudo apt-get install -y ca-certificates curl
     sudo install -m 0755 -d /etc/apt/keyrings
-    sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    sudo -E curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
     sudo chmod a+r /etc/apt/keyrings/docker.asc
 
     # Add the repository to Apt sources:
@@ -86,7 +100,7 @@ function install-docker-ubuntu {
 
     DOCKER_PKG_NAME=$(apt-cache madison docker-ce | awk '{ print $3 }' | grep ${DOCKER_VERSION} | head -n 1)
 
-    sudo apt-get -y install docker-ce=${DOCKER_PKG_NAME} docker-ce-cli=${DOCKER_PKG_NAME} containerd.io docker-buildx-plugin docker-compose-plugin
+    sudo apt-get -y install docker-ce=${DOCKER_PKG_NAME} docker-ce-cli=${DOCKER_PKG_NAME} containerd.io docker-buildx-plugin docker-compose-plugin  --allow-downgrades
 }
 
 function install-docker-rhel {
@@ -117,7 +131,7 @@ function install-docker-rhel {
 
 function install-docker-fedora {
     # using instructions from:
-    # https://docs.docker.com/engine/install/rhel/#install-using-the-repository
+    # https://docs.docker.com/engine/install/fedora/
     sudo dnf remove -y docker \
                   docker-client \
                   docker-client-latest \
@@ -130,7 +144,17 @@ function install-docker-fedora {
                   docker-engine
 
     sudo dnf install -y dnf-plugins-core
-    sudo dnf config-manager -y --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+
+    if (( VERSION_ID >= 37 )); then
+        sudo dnf-3 config-manager -y --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+    else
+        sudo dnf config-manager -y --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+    fi
+
+    if (( VERSION_ID >= 42 )); then
+        # For compatability purposes
+        DOCKER_VERSION="28.2.2"
+    fi
 
     DOCKER_PKG_NAME=$(dnf list docker-ce --showduplicates | awk '{ print $2 }' | grep ${DOCKER_VERSION} | head -n 1)
     DOCKER_CLI_PKG_NAME=$(dnf list docker-ce-cli --showduplicates | awk '{ print $2 }' | grep ${DOCKER_VERSION} | head -n 1)
@@ -232,11 +256,17 @@ function install-containerlab {
         check_os
     fi
 
+    # Determine package name with optional version suffix
+    local CLAB_PKG="containerlab"
+    if [ -n "${CLAB_VERSION}" ]; then
+        CLAB_PKG="containerlab-${CLAB_VERSION}"
+    fi
+
     if [ "${DISTRO_TYPE}" = "rhel" ]; then
         sudo yum-config-manager -y --add-repo=https://netdevops.fury.site/yum/ && \
         echo "gpgcheck=0" | sudo tee -a /etc/yum.repos.d/netdevops.fury.site_yum_.repo
 
-        sudo yum install -y containerlab
+        sudo yum install -y ${CLAB_PKG}
 
     elif [ "${DISTRO_TYPE}" = "fedora" ]; then
         # Fedora 41 onwards ships with dnf5 instead of dnf 4 (packaged just as 'dnf')
@@ -249,14 +279,29 @@ function install-containerlab {
             echo "gpgcheck=0" | sudo tee -a /etc/yum.repos.d/netdevops.fury.site_yum_.repo
         fi
 
-        sudo dnf install -y containerlab
+        sudo dnf install -y ${CLAB_PKG}
 
     else
         echo "deb [trusted=yes] https://netdevops.fury.site/apt/ /" | \
         sudo tee -a /etc/apt/sources.list.d/netdevops.list
 
-        sudo apt update -y && sudo apt install containerlab -y
+        # For apt, version is specified with = separator
+        if [ -n "${CLAB_VERSION}" ]; then
+            sudo apt update -y && sudo apt install containerlab=${CLAB_VERSION} -y
+        else
+            sudo apt update -y && sudo apt install containerlab -y
+        fi
     fi
+}
+
+function post-install-clab {
+    if [ $(getent group clab_admins) ]; then
+        echo "clab_admins group exists"
+    else
+      echo "Creating clab_admins group..."
+      groupadd -r clab_admins 
+    fi
+    sudo usermod -aG clab_admins "$SUDO_USER"
 }
 
 function all {
@@ -275,6 +320,10 @@ function all {
     add-ssh-socket-env-for-sudo
 
     install-containerlab
+
+    if [ "${CLAB_ADMINS}" = "true" ]; then
+        post-install-clab
+    fi
 }
 
 "$@"

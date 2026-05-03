@@ -10,10 +10,10 @@ Suite Teardown      Run Keyword    Teardown
 *** Variables ***
 ${lab-name}                 internal-ca
 ${topo}                     ${CURDIR}/10-${lab-name}.clab.yml
-${ca-keysize}               512
-${l1-keysize}               512
+${ca-keysize}               1024
+${l1-keysize}               1024
 ${l1-validity-duration}     25 hours
-${l2-keysize}               1024
+${l2-keysize}               2048
 ${ca-validity-duration}     5 hours
 
 # cert files
@@ -31,7 +31,7 @@ ${l3-cert}                  ${CURDIR}/clab-${lab-name}/.tls/l3/l3.pem
 Deploy ${lab-name} lab
     Log    ${CURDIR}
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} deploy -t ${topo}
+    ...    ${CLAB_BIN} --runtime ${runtime} deploy -t ${topo}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
     # save output to be used in next steps
@@ -104,9 +104,10 @@ Verify l2 extra SANs
     Should Contain    ${certificate_output}    DNS:my.text.fqdn
     Should Contain    ${certificate_output}    IP Address:192.168.33.44
 
+
 *** Keywords ***
 Teardown
-    Run    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${topo} --cleanup
+    Run    ${CLAB_BIN} --runtime ${runtime} destroy -t ${topo} --cleanup
 
 Get Certificate Date
     [Arguments]    ${certificate_output}    ${type}

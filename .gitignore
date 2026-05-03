@@ -34,6 +34,7 @@ site/
 .vscode/
 .idea/
 .DS_Store
+containerlab.code-workspace
 __rd*
 tests/out
 # ignore backup clab topo files
@@ -46,4 +47,17 @@ tests/out
 
 
 # readd test labDir files
-!clab/test_data/clab-*
+!core/test_data/clab-*
+__pycache__
+
+.env
+
+.zed
+
+# to keep robot things away
+venv/
+.venv/
+
+# rf test report files
+tests/*.xml
+tests/*.html

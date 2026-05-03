@@ -5,19 +5,19 @@
 package k8s_kind
 
 import (
-	log "github.com/sirupsen/logrus"
+	"github.com/charmbracelet/log"
 	kindLog "sigs.k8s.io/kind/pkg/log"
 )
 
 // kindLogger implements the log.Logger interface for kind.
 type kindLogger struct {
-	l log.FieldLogger
+	l *log.Logger
 	v kindLog.Level
 }
 
 func newKindLogger(clusterName string, v kindLog.Level) *kindLogger {
 	return &kindLogger{
-		l: log.WithField("kind-cluster", clusterName),
+		l: log.With("kind-cluster", clusterName),
 		v: v,
 	}
 }
@@ -26,7 +26,7 @@ func (l *kindLogger) Warn(message string) {
 	l.l.Warn(message)
 }
 
-func (l *kindLogger) Warnf(format string, args ...interface{}) {
+func (l *kindLogger) Warnf(format string, args ...any) {
 	l.l.Warnf(format, args...)
 }
 
@@ -34,7 +34,7 @@ func (l *kindLogger) Error(message string) {
 	l.l.Error(message)
 }
 
-func (l *kindLogger) Errorf(format string, args ...interface{}) {
+func (l *kindLogger) Errorf(format string, args ...any) {
 	l.l.Errorf(format, args...)
 }
 
@@ -47,7 +47,7 @@ func (l *kindLogger) V(v kindLog.Level) kindLog.InfoLogger {
 }
 
 type kindInfoLogger struct {
-	l       log.FieldLogger
+	l       *log.Logger
 	v       kindLog.Level
 	enabled bool
 }
@@ -59,7 +59,7 @@ func (l *kindInfoLogger) Info(message string) {
 	l.l.Info(message)
 }
 
-func (l *kindInfoLogger) Infof(format string, args ...interface{}) {
+func (l *kindInfoLogger) Infof(format string, args ...any) {
 	if !l.enabled {
 		return
 	}

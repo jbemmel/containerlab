@@ -11,7 +11,8 @@ nav:
           - manual/kinds/index.md
           - Nokia:
               - Nokia SR Linux: manual/kinds/srl.md
-              - Nokia SR OS: manual/kinds/vr-sros.md
+              - Nokia SR OS (SR-SIM): manual/kinds/sros.md
+              - Nokia SR OS (vSIM): manual/kinds/vr-sros.md
           - Arista:
               - Arista cEOS: manual/kinds/ceos.md
               - Arista vEOS: manual/kinds/vr-veos.md
@@ -23,17 +24,22 @@ nav:
               - Cisco Nexus 9000v: manual/kinds/vr-n9kv.md
               - Cisco 8000: manual/kinds/c8000.md
               - Cisco c8000v: manual/kinds/vr-c8000v.md
+              - Cisco SD-WAN: manual/kinds/cisco_sdwan.md
               - Cisco Catalyst 9000v: manual/kinds/vr-cat9kv.md
               - Cisco IOL: manual/kinds/cisco_iol.md
+              - Cisco VIOS: manual/kinds/cisco_vios.md
+              - Cisco ASAv: manual/kinds/cisco_asav.md
               - Cisco FTDv: manual/kinds/vr-ftdv.md
           - Juniper:
               - Juniper cRPD: manual/kinds/crpd.md
+              - Juniper cSRX: manual/kinds/csrx.md
               - Juniper vMX: manual/kinds/vr-vmx.md
               - Juniper vQFX: manual/kinds/vr-vqfx.md
               - Juniper vSRX: manual/kinds/vr-vsrx.md
               - Juniper vJunos-router: manual/kinds/vr-vjunosrouter.md
               - Juniper vJunos-switch: manual/kinds/vr-vjunosswitch.md
               - Juniper vJunosEvolved: manual/kinds/vr-vjunosevolved.md
+              - Juniper cJunosEvolved: manual/kinds/cjunosevolved.md
           - Cumulus VX: manual/kinds/cvx.md
           - Aruba AOS-CX: manual/kinds/vr-aoscx.md
           - SONiC:
@@ -45,13 +51,21 @@ nav:
           - MikroTik RouterOS: manual/kinds/vr-ros.md
           - Huawei VRP: manual/kinds/huawei_vrp.md
           - IPInfusion OcNOS: manual/kinds/ipinfusion-ocnos.md
+          - VyOS Networks VyOS: manual/kinds/vyosnetworks_vyos.md
           - OpenBSD: manual/kinds/openbsd.md
           - FreeBSD: manual/kinds/freebsd.md
+          - OpenWRT: manual/kinds/openwrt.md
           - Keysight IXIA-C One: manual/kinds/keysight_ixia-c-one.md
           - Ostinato: manual/kinds/ostinato.md
+          - Spirent TestCenter: manual/kinds/spirent_stc.md
           - Check Point Cloudguard: manual/kinds/checkpoint_cloudguard.md
           - Fortinet Fortigate: manual/kinds/fortinet_fortigate.md
+          - F5 BIG-IP VE: manual/kinds/f5_bigipve.md
           - Palo Alto PAN: manual/kinds/vr-pan.md
+          - 6WIND VSR: manual/kinds/6wind_vsr.md
+          - Arrcus ArcOS: manual/kinds/arrcus_arcos.md
+          - FD.io VPP: manual/kinds/fdio_vpp.md
+          - veesix osvbng: manual/kinds/veesix_osvbng.md
           - KinD: manual/kinds/k8s-kind.md
           - Linux bridge: manual/kinds/bridge.md
           - Linux container: manual/kinds/linux.md
@@ -68,6 +82,7 @@ nav:
           - manual/clabernetes/index.md
           - Install: manual/clabernetes/install.md
           - Quickstart: manual/clabernetes/quickstart.md
+          - Configuration: manual/clabernetes/configuration.md
           - Packet capture in c9s: manual/clabernetes/pcap.md
       - Node filtering: manual/node-filtering.md
       - Multi-node labs: manual/multi-node.md
@@ -75,7 +90,10 @@ nav:
       - Inventory: manual/inventory.md
       - Image management: manual/images.md
       - Labs and Codespaces: manual/codespaces.md
+      - VS Code Extension: manual/vsc-extension.md
       - Link Impairments: manual/impairments.md
+      - Share lab access: manual/share-access.md
+      - Configuration management: manual/config-mgmt.md
       - Developers guide:
           - manual/dev/index.md
           - Documentation: manual/dev/doc.md
@@ -84,8 +102,14 @@ nav:
   - Command reference:
       - deploy: cmd/deploy.md
       - destroy: cmd/destroy.md
+      - start: cmd/start.md
+      - stop: cmd/stop.md
+      - restart: cmd/restart.md
       - redeploy: cmd/redeploy.md
-      - inspect: cmd/inspect.md
+      - inspect:
+          - cmd/inspect/index.md
+          - interfaces: cmd/inspect/interfaces.md
+      - events: cmd/events.md
       - save: cmd/save.md
       - exec: cmd/exec.md
       - generate: cmd/generate.md
@@ -103,7 +127,26 @@ nav:
               - sign: cmd/tools/cert/sign.md
           - netem:
               - set: cmd/tools/netem/set.md
+              - reset: cmd/tools/netem/reset.md
               - show: cmd/tools/netem/show.md
+          - api-server:
+              - start: cmd/tools/api-server/start.md
+              - stop: cmd/tools/api-server/stop.md
+              - status: cmd/tools/api-server/status.md
+          - sshx:
+              - attach: cmd/tools/sshx/attach.md
+              - detach: cmd/tools/sshx/detach.md
+              - reattach: cmd/tools/sshx/reattach.md
+              - list: cmd/tools/sshx/list.md
+          - gotty:
+              - attach: cmd/tools/gotty/attach.md
+              - detach: cmd/tools/gotty/detach.md
+              - reattach: cmd/tools/gotty/reattach.md
+              - list: cmd/tools/gotty/list.md
+          - snapshot save: cmd/tools/snapshot/save.md
+      - version:
+          - cmd/version/index.md
+          - check: cmd/version/check.md
       - completions: cmd/completion.md
   - Lab examples:
       - About: lab-examples/lab-examples.md
@@ -117,7 +160,7 @@ nav:
       - External bridge capability: lab-examples/ext-bridge.md
       - WAN topology: lab-examples/wan.md
       - Peering lab: lab-examples/peering-lab.md
-      - Nokia SR Linux and Nokia SR OS: lab-examples/vr-sros.md
+      - Nokia SR Linux and Nokia SR OS: lab-examples/sr-sim.md
       - Nokia SR Linux and Juniper vMX: lab-examples/vr-vmx.md
       - Nokia SR Linux and Cisco XRd: lab-examples/srl-xrd.md
       - Nokia SR Linux and Cisco XRv9k: lab-examples/vr-xrv9k.md
@@ -125,6 +168,8 @@ nav:
       - Nokia SR Linux and FRR: lab-examples/srl-frr.md
       - Nokia SR Linux and Juniper vJunos-switch: lab-examples/srl-vjunos-switch.md
       - Nokia SR Linux and Juniper vJunosEvolved: lab-examples/srl-vjunosevolved.md
+      - Nokia SR Linux and Juniper cJunosEvolved: lab-examples/srl-cjunosevolved.md
+      - Nokia SR Linux and Arrcus ArcOS: lab-examples/srl-arcos.md
       - FRR: lab-examples/frr01.md
       - Cumulus Linux and FRR: lab-examples/cvx01.md
       - Cumulus Linux (docker runtime) and Host: lab-examples/cvx02.md
@@ -135,12 +180,28 @@ nav:
       - RARE/freeRtr: lab-examples/rare-freertr.md
       - Juniper vSRX: lab-examples/vsrx01.md
       - OpenBSD: lab-examples/openbsd01.md
+      - Cisco ASAv: lab-examples/asav01.md
       - Cisco FTDv: lab-examples/ftdv01.md
+      - F5 BIG-IP VE: lab-examples/f5bigipve01.md
+      - v::n osvbng: lab-examples/osvbng01.md
       - Templated labs:
           - Leaf-spine topology: lab-examples/templated01.md
           - 5-stage Clos topology: lab-examples/templated02.md
       - Generic VM: lab-examples/generic_vm01.md
   - Release notes:
+      - "0.75": rn/0.75.md
+      - "0.74": rn/0.74.md
+      - "0.73": rn/0.73.md
+      - "0.72": rn/0.72.md
+      - "0.71": rn/0.71.md
+      - "0.70": rn/0.70.md
+      - "0.69": rn/0.69.md
+      - "0.68": rn/0.68.md
+      - "0.67": rn/0.67.md
+      - "0.66": rn/0.66.md
+      - "0.65": rn/0.65.md
+      - "0.64": rn/0.64.md
+      - "0.63": rn/0.63.md
       - "0.62": rn/0.62.md
       - "0.61": rn/0.61.md
       - "0.60": rn/0.60.md
@@ -184,19 +245,19 @@ nav:
       - "0.22": rn/0.22.md
       - "0.21": rn/0.21.md
       - "0.20": rn/0.20.md
-      - 0.19: rn/0.19.md
-      - 0.18: rn/0.18.md
-      - 0.17: rn/0.17.md
-      - 0.16: rn/0.16.md
-      - 0.15: rn/0.15.md
-      - 0.14.4: rn/0.14.4.md
-      - 0.14.3: rn/0.14.3.md
-      - 0.14.2: rn/0.14.2.md
-      - 0.14.1: rn/0.14.1.md
-      - 0.14.0: rn/0.14.0.md
-      - 0.13.0: rn/0.13.0.md
-      - 0.12.0: rn/0.12.0.md
-      - 0.11.0: rn/0.11.0.md
+      - "0.19": rn/0.19.md
+      - "0.18": rn/0.18.md
+      - "0.17": rn/0.17.md
+      - "0.16": rn/0.16.md
+      - "0.15": rn/0.15.md
+      - "0.14.4": rn/0.14.4.md
+      - "0.14.3": rn/0.14.3.md
+      - "0.14.2": rn/0.14.2.md
+      - "0.14.1": rn/0.14.1.md
+      - "0.14.0": rn/0.14.0.md
+      - "0.13.0": rn/0.13.0.md
+      - "0.12.0": rn/0.12.0.md
+      - "0.11.0": rn/0.11.0.md
   - Community: community.md
 
 site_author: Roman Dodin
@@ -226,7 +287,6 @@ theme:
     - search.suggest
     - content.code.annotate
     - content.code.copy
-    - content.code.select
     - content.action.edit
     - toc.follow
     - content.tooltips
@@ -287,8 +347,8 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/hellt
-    - icon: fontawesome/brands/twitter
-      link: https://twitter.com/ntdvps
+    - icon: fontawesome/brands/bluesky
+      link: https://bsky.app/profile/containerlab.dev
     - icon: fontawesome/brands/discord
       link: https://discord.gg/vAyddtaEV9
   consent:

@@ -38,7 +38,7 @@ Deploy ${lab-name} lab
     Should Contain    ${output}    mtu 9100    msg=Bridge mtu is not 9100 before lab deployment
 
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} deploy -t ${CURDIR}/${lab-file}
+    ...    ${CLAB_BIN} --runtime ${runtime} deploy -t ${CURDIR}/${lab-file}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
@@ -97,7 +97,7 @@ Check host interface for l2 node
 
     Should Contain    ${output}    link-netns clab-vxlan-tools-l2
 
-Deploy vxlab link between l1 and l3 with tools cmd
+Deploy vxlan link between l1 and l3 with tools cmd
     # log bridge details to check if its mtu is really set to 9100 after the lab deployment
     ${rc}    ${output} =    Run And Return Rc And Output
     ...    sudo ip link show ${vxlan-br}
@@ -105,7 +105,7 @@ Deploy vxlab link between l1 and l3 with tools cmd
     Should Contain    ${output}    mtu 9100
 
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} tools vxlan create --remote 172.20.25.23 --link ${l1_host_link} --id 101 --port 14788
+    ...    ${CLAB_BIN} --runtime ${runtime} tools vxlan create --remote 172.20.25.23 --link ${l1_host_link} --id 101 --port 14788
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
@@ -124,9 +124,9 @@ Check VxLAN connectivity l1-l3
         Wait Until Keyword Succeeds    60    2s    Check VxLAN connectivity l1->l3
     END
 
-Deploy vxlab link between l2 and l4 with tools cmd
+Deploy vxlan link between l2 and l4 with tools cmd
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} tools vxlan create --remote 172.20.25.24 --link ${l2_host_link} --id 102
+    ...    ${CLAB_BIN} --runtime ${runtime} tools vxlan create --remote 172.20.25.24 --link ${l2_host_link} --id 102
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
@@ -167,7 +167,7 @@ Setup
 
 Cleanup
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file} --cleanup
+    ...    ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file} --cleanup
     Log    ${output}
 
     ${rc}    ${output} =    Run And Return Rc And Output

@@ -2,7 +2,9 @@
 
 ### Description
 
-The `redeploy` command redeploys a lab referenced by a provided topology definition file. It effectively combines the `destroy` and `deploy` commands into a single operation.
+The `redeploy` command redeploys a whole lab referenced by a provided topology definition file. It effectively combines the `destroy` and `deploy` commands into a single operation.
+
+> If you want to redeploy a node in a lab, see [start](start.md), [stop](stop.md), and [restart](restart.md) commands.
 
 The two most common applications of this command are:
 
@@ -27,6 +29,8 @@ The two most common applications of this command are:
     ```
 
     This command will destroy the lab and remove the lab directory before deploying the lab again. This ensures a clean redeployment as if you were deploying a lab for the first time discarding any previous lab state.
+
+--8<-- "docs/cmd/deploy.md:env-vars-flags"
 
 ### Usage
 
@@ -82,17 +86,24 @@ Do not try to remove the management network during destroy phase. Usually the ma
 
 #### skip-post-deploy
 
-The `--skip-post-deploy` flag can be used to skip the post-deploy phase of the lab deployment. This is a global flag that affects all nodes in the lab.
+The `--skip-post-deploy` flag skips the post-deploy phase of the lab deployment, affecting all nodes.
+
+The post-deploy phase runs after containers and network endpoints are created. Depending on the node kind, it may include:
+
+- Readiness and health checks
+- TLS certificate provisioning
+- Saving startup configuration
+- Applying overlay CLI configuration
+- Populating `/etc/hosts` with peer node entries
+- Disabling TX checksum offload
+
+Node kinds with notable post-deploy actions include Nokia SR Linux, Nokia SR OS, Arista cEOS, Juniper cRPD, Linux, and vrnetlab-based nodes. Kinds without a post-deploy phase are unaffected by this flag.
+
+This flag is useful to bypass post-deploy validation failures or to speed up redeployment when only the running containers are needed.
 
 #### export-template
 
 The local `--export-template` flag allows a user to specify a custom Go template that will be used for exporting topology data into `topology-data.json` file under the lab directory.
-
-#### node-filter
-
-The local `--node-filter` flag allows users to specify a subset of topology nodes targeted by `redeploy` command. The value of this flag is a comma-separated list of node names as they appear in the topology.
-
-When a subset of nodes is specified, containerlab will only redeploy those nodes and their links and ignore the rest.
 
 #### skip-labdir-acl
 
@@ -124,10 +135,4 @@ containerlab redeploy
 
 ```bash
 clab rdep -t mylab.clab.yml
-```
-
-#### Redeploy specific nodes in a lab
-
-```bash
-containerlab redeploy -t mylab.clab.yml --node-filter "node1,node2"
 ```

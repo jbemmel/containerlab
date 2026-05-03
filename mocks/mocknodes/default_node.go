@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	exec "github.com/srl-labs/containerlab/clab/exec"
+	exec "github.com/srl-labs/containerlab/exec"
 	runtime "github.com/srl-labs/containerlab/runtime"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -129,6 +129,21 @@ func (mr *MockNodeOverwritesMockRecorder) GetMappedInterfaceName(ifName any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMappedInterfaceName", reflect.TypeOf((*MockNodeOverwrites)(nil).GetMappedInterfaceName), ifName)
 }
 
+// GetNSPath mocks base method.
+func (m *MockNodeOverwrites) GetNSPath(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNSPath", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNSPath indicates an expected call of GetNSPath.
+func (mr *MockNodeOverwritesMockRecorder) GetNSPath(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNSPath", reflect.TypeOf((*MockNodeOverwrites)(nil).GetNSPath), ctx)
+}
+
 // PullImage mocks base method.
 func (m *MockNodeOverwrites) PullImage(ctx context.Context) error {
 	m.ctrl.T.Helper()
@@ -156,6 +171,20 @@ func (m *MockNodeOverwrites) RunExec(arg0 context.Context, arg1 *exec.ExecCmd) (
 func (mr *MockNodeOverwritesMockRecorder) RunExec(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RunExec", reflect.TypeOf((*MockNodeOverwrites)(nil).RunExec), arg0, arg1)
+}
+
+// VerifyContainerName mocks base method.
+func (m *MockNodeOverwrites) VerifyContainerName() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyContainerName")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// VerifyContainerName indicates an expected call of VerifyContainerName.
+func (mr *MockNodeOverwritesMockRecorder) VerifyContainerName() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VerifyContainerName", reflect.TypeOf((*MockNodeOverwrites)(nil).VerifyContainerName))
 }
 
 // VerifyHostRequirements mocks base method.

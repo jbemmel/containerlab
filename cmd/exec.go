@@ -10,90 +10,88 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/srl-labs/containerlab/clab"
-	"github.com/srl-labs/containerlab/clab/exec"
-	"github.com/srl-labs/containerlab/labels"
-	"github.com/srl-labs/containerlab/runtime"
-	"github.com/srl-labs/containerlab/types"
+	clabconstants "github.com/srl-labs/containerlab/constants"
+	clabcore "github.com/srl-labs/containerlab/core"
+	clabexec "github.com/srl-labs/containerlab/exec"
 )
 
-var (
-	labelsFilter []string
-	execFormat   string
-	execCommands []string
-)
+func execCmd(o *Options) (*cobra.Command, error) {
+	c := &cobra.Command{
+		Use:   "exec",
+		Short: "execute a command in one or multiple containers",
+		RunE: func(cobraCmd *cobra.Command, _ []string) error {
+			return execFn(cobraCmd, o)
+		},
+	}
 
-// execCmd represents the exec command.
-var execCmd = &cobra.Command{
-	Use:     "exec",
-	Short:   "execute a command on one or multiple containers",
-	PreRunE: sudoCheck,
-	RunE:    execFn,
+	c.Flags().StringArrayVarP(
+		&o.Exec.Commands,
+		"cmd",
+		"",
+		o.Exec.Commands,
+		"command to execute",
+	)
+	c.Flags().StringSliceVarP(
+		&o.Filter.LabelFilter,
+		"label",
+		"",
+		o.Filter.LabelFilter,
+		"labels to filter container subset",
+	)
+	c.Flags().StringVarP(
+		&o.Exec.Format,
+		"format",
+		"f",
+		o.Exec.Format,
+		"output format. One of [json, plain]",
+	)
+
+	return c, nil
 }
 
-func execFn(_ *cobra.Command, _ []string) error {
+func execFn(_ *cobra.Command, o *Options) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if len(execCommands) == 0 {
+	if len(o.Exec.Commands) == 0 {
 		return errors.New("provide command to execute")
 	}
 
-	outputFormat, err := exec.ParseExecOutputFormat(execFormat)
+	outputFormat, err := clabexec.ParseExecOutputFormat(o.Exec.Format)
 	if err != nil {
 		return err
 	}
 
-	opts := make([]clab.ClabOption, 0, 5)
-
-	// exec can work with or without a topology file
-	// when topology file is provided we need to parse it
-	// when topo file is not provided, we rely on labels to perform the filtering
-	if topo != "" {
-		opts = append(opts, clab.WithTopoPath(topo, varsFile))
-	}
-
-	opts = append(opts,
-		clab.WithTimeout(timeout),
-		clab.WithRuntime(rt,
-			&runtime.RuntimeConfig{
-				Debug:            debug,
-				Timeout:          timeout,
-				GracefulShutdown: graceful,
-			},
-		),
-		clab.WithDebug(debug),
-	)
-
-	if name != "" {
-		opts = append(opts, clab.WithLabName(name))
-	}
-
-	c, err := clab.NewContainerLab(opts...)
+	c, err := clabcore.NewContainerLab(o.ToClabOptions()...)
 	if err != nil {
 		return err
 	}
 
-	var filters []*types.GenericFilter
-
-	if len(labelsFilter) != 0 {
-		filters = types.FilterFromLabelStrings(labelsFilter)
+	err = c.CheckConnectivity(ctx)
+	if err != nil {
+		return err
 	}
 
-	if topo != "" {
-		labFilter := []string{fmt.Sprintf("%s=%s", labels.Containerlab, c.Config.Name)}
-		filters = append(filters, types.FilterFromLabelStrings(labFilter)...)
+	listOptions := []clabcore.ListOption{
+		clabcore.WithListFromCliArgs(o.Filter.LabelFilter),
 	}
 
-	resultCollection, err := c.Exec(ctx, execCommands, clab.NewExecOptions(filters))
+	if o.Global.TopologyFile != "" {
+		listOptions = append(
+			listOptions,
+			clabcore.WithListLabName(c.Config.Name),
+		)
+	}
+
+	resultCollection, err := c.Exec(ctx, o.Exec.Commands, listOptions...)
 	if err != nil {
 		return err
 	}
 
 	switch outputFormat {
-	case exec.ExecFormatPlain:
+	case clabconstants.FormatPlain:
 		resultCollection.Log()
-	case exec.ExecFormatJSON:
+	case clabconstants.FormatJSON:
 		out, err := resultCollection.Dump(outputFormat)
 		if err != nil {
 			return fmt.Errorf("failed to print the results collection: %v", err)
@@ -103,11 +101,4 @@ func execFn(_ *cobra.Command, _ []string) error {
 	}
 
 	return err
-}
-
-func init() {
-	rootCmd.AddCommand(execCmd)
-	execCmd.Flags().StringArrayVarP(&execCommands, "cmd", "", []string{}, "command to execute")
-	execCmd.Flags().StringSliceVarP(&labelsFilter, "label", "", []string{}, "labels to filter container subset")
-	execCmd.Flags().StringVarP(&execFormat, "format", "f", "plain", "output format. One of [json, plain]")
 }

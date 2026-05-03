@@ -159,6 +159,14 @@ This section logs the most notable blogs, streams, and and demos delivered by co
 Do you have a blog around containerlab that you want to share with the community? Please let us know by mentioning it in the [Comments](#__comments) section at the bottom of this page.
 ///
 
+### Creating custom Containerlab node kinds
+
+<small>:material-text: [Blog](https://torbjorn.dev/blog/creating-clab-node-kinds/) by [Torbjørn Bang](https://www.linkedin.com/in/torbjornbang/) · :material-calendar: 2025-10-26</small>
+
+In this post Torbjørn guides us through adding new vrnetlab based node kinds to Containerlab.
+He covers both building container images for your VM based NOS using vrnetlab, and subsequently adding support for them in containerlab.
+This is a great read if you are looking to get started modifying/adding containerlab node kinds!
+
 ### Extending the Kubernetes (host) network with EVPN tunnels
 
 <small>:material-text: [Blog](https://fedepaol.github.io/blog/2024/06/14/extending-the-kubernetes-host-network-with-evpn-tunnels-and-frr/) by [Federico Paolinelli](https://fedepaol.github.io/about/) · :material-calendar: 2024-06-14</small>
@@ -205,7 +213,7 @@ As you can see, containerlab fits this bill quite nicely. Dave goes on to [expla
 
 ### Powering up your Netbox labs with Containerlab
 
-<small>:material-text: [Blog](https://netboxlabs.com/blog/network-configuration-assurance-with-netbox-and-ansible/) by [Rich Bibby](https://netboxlabs.com/author/richard-bibby/) · :material-calendar: 2024-03-20</small>
+<small>:material-text: [Blog](https://netboxlabs.com/blog/network-configuration-assurance-with-netbox-and-ansible/) by Rich Bibby · :material-calendar: 2024-03-20</small>
 
 Our friends at NetboxLabs have authored a nice blog post - Network Configuration Assurance With NetBox and Ansible - and they have used containerlab to create a lab environment to present their solution.
 
@@ -245,19 +253,19 @@ Inmanta is a network orchestration and automation platform. In these [YouTube se
 
 Real-time telemetry from a 5 stage Clos fabric describes lightweight emulation of realistic data center switch topologies using Containerlab. This article extends the testbed to experiment with distributed denial of service (DDoS) detection and mitigation techniques described in Real-time DDoS mitigation using BGP RTBH and FlowSpec.
 
-### Multi-vendor EVPN VXLAN setup with Containerlab
+<!-- ### Multi-vendor EVPN VXLAN setup with Containerlab
 
 <small>:material-text: [Blog](https://www.theasciiconstruct.com/blog/2022/03/12/multi-vendor-evpn-vxlan-setup-with-containerlab/) by [@aninchat](https://twitter.com/aninchat) · :material-calendar: 2022-03-12</small>
 
-In this post, we deploy a multivendor EVPN L2 overlay fabric, with BGP in the underlay as well. The entire fabric deployment is automated with Ansible, and Containerlab is used to define and deploy the actual topology.
+In this post, we deploy a multivendor EVPN L2 overlay fabric, with BGP in the underlay as well. The entire fabric deployment is automated with Ansible, and Containerlab is used to define and deploy the actual topology. -->
 
 ### Network Simulation Tools and Containerlab
 
 <small>:material-text: [Blog](https://juliopdx.com/2022/02/13/network-simulation-tools-and-containerlab/) by [@JulioPDX](https://twitter.com/Julio_PDX) · :material-calendar: 2022-02-13</small>
 
-I’ve been progressing through a series of technical books, some of which I’ve shared on other blogs. A few of them focus on BGP. BGP being so broad, I decided to create a challenge lab. Creating the challenge/troubleshooting labs has really made more concepts stick. I’m trying to use the principle of teaching someone to make the learning last. These have been incredibly fun to create and the community interaction has been amazing. One brave soul(Jeroen van Bemmel) shared his solution. I was fascinated on his solution and how he created his topology with Containerlab and net-sim tools.
+I’ve been progressing through a series of technical books, some of which I’ve shared on other blogs. A few of them focus on BGP. BGP being so broad, I decided to create a challenge lab. Creating the challenge/troubleshooting labs has really made more concepts stick. I’m trying to use the principle of teaching someone to make the learning last. These have been incredibly fun to create and the community interaction has been amazing. One brave soul (Jeroen van Bemmel) shared his solution. I was fascinated on his solution and how he created his topology with Containerlab and net-sim tools.
 
-### Juniper vQFX and containerlab
+<!-- ### Juniper vQFX and containerlab
 
 <small>:material-text: [Blog](https://www.theasciiconstruct.com/blog/2022/01/24/juniper-vqfx-and-containerlab) by [@aninchat](https://twitter.com/aninchat) · :material-calendar: 2022-02-06</small>
 
@@ -269,7 +277,7 @@ In this post, we look at how Containerlab can be used to quickly spin up vQFX to
 
 I’ve been working my way through Optimal Routing Design by Russ White, Don Slice, and Alvaro Retana. It has been a great read so far and I highly recommend it. When I work through a book I usually try and lab up any concept I can, this helps me make it stick as much as possible. Early on in the book the authors mention redistribution and possible issues that can come with doing it at more than one point in the network. So here we are reading this post. I hope you enjoy and possibly learn something along the way.
 
-Discussions: [:material-twitter:](https://twitter.com/Julio_PDX/status/1485040052811960321)
+Discussions: [:material-twitter:](https://twitter.com/Julio_PDX/status/1485040052811960321) -->
 
 ### Real-time telemetry from a 5 stage Clos fabric
 

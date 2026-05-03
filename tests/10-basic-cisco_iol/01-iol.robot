@@ -16,7 +16,7 @@ ${runtime}          docker
 Deploy ${lab-name} lab
     Log    ${CURDIR}
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} deploy -t ${CURDIR}/${lab-file-name}
+    ...    ${CLAB_BIN} --runtime ${runtime} deploy -t ${CURDIR}/${lab-file-name}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
@@ -39,7 +39,7 @@ Verify links in node switch
     Should Contain    ${output}    172.20.20.
     Should Contain    ${output}    up
 
-Verify parital startup configuration on router2
+Verify partial startup configuration on router2
     ${rc}    ${output} =    Run And Return Rc And Output
     ...    sshpass -p "admin" ssh -o "IdentitiesOnly=yes" admin@clab-${lab-name}-router2 show running-config interface Loopback0
     Log    ${output}
@@ -55,7 +55,7 @@ Verify full startup configuration on router3
 
 Save running-config to startup-config to NVRAM with clab save
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} save -t ${CURDIR}/${lab-file-name}
+    ...    ${CLAB_BIN} --runtime ${runtime} save -t ${CURDIR}/${lab-file-name}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
@@ -94,14 +94,14 @@ Log IP addresses for switch
 Destroy ${lab-name} lab
     Log    ${CURDIR}
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file-name}
+    ...    ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file-name}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
 Re-deploy ${lab-name} lab
     Log    ${CURDIR}
     ${rc}    ${output} =    Run And Return Rc And Output
-    ...    sudo -E ${CLAB_BIN} --runtime ${runtime} deploy -t ${CURDIR}/${lab-file-name}
+    ...    ${CLAB_BIN} --runtime ${runtime} deploy -t ${CURDIR}/${lab-file-name}
     Log    ${output}
     Should Be Equal As Integers    ${rc}    0
 
@@ -147,4 +147,4 @@ Verify connectivity via new management addresses on switch
 
 *** Keywords ***
 Cleanup
-    Run    sudo -E ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file-name} --cleanup
+    Run    ${CLAB_BIN} --runtime ${runtime} destroy -t ${CURDIR}/${lab-file-name} --cleanup

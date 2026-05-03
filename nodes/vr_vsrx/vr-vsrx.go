@@ -5,21 +5,18 @@
 package vr_vsrx
 
 import (
-	"context"
 	"fmt"
 	"path"
 	"regexp"
 
-	log "github.com/sirupsen/logrus"
-	"github.com/srl-labs/containerlab/netconf"
-	"github.com/srl-labs/containerlab/nodes"
-	"github.com/srl-labs/containerlab/types"
-	"github.com/srl-labs/containerlab/utils"
+	clabnodes "github.com/srl-labs/containerlab/nodes"
+	clabtypes "github.com/srl-labs/containerlab/types"
+	clabutils "github.com/srl-labs/containerlab/utils"
 )
 
 var (
 	kindNames          = []string{"juniper_vsrx", "vr-vsrx", "vr-juniper_vsrx"}
-	defaultCredentials = nodes.NewCredentials("admin", "admin@123")
+	defaultCredentials = clabnodes.NewCredentials("admin", "admin@123")
 
 	InterfaceRegexp = regexp.MustCompile(`(?:et|xe|ge)-0/0/(?P<port>\d+)$`)
 	InterfaceOffset = 0
@@ -31,28 +28,35 @@ const (
 	generateIfFormat = "ge-0/0/%d"
 
 	scrapliPlatformName = "juniper_junos"
-
-	configDirName   = "config"
-	startupCfgFName = "startup-config.cfg"
+	NapalmPlatformName  = "junos"
 )
 
 // Register registers the node in the NodeRegistry.
-func Register(r *nodes.NodeRegistry) {
-	generateNodeAttributes := nodes.NewGenerateNodeAttributes(generateable, generateIfFormat)
-	nrea := nodes.NewNodeRegistryEntryAttributes(defaultCredentials, generateNodeAttributes)
+func Register(r *clabnodes.NodeRegistry) {
+	generateNodeAttributes := clabnodes.NewGenerateNodeAttributes(generateable, generateIfFormat)
+	platformAttrs := &clabnodes.PlatformAttrs{
+		ScrapliPlatformName: scrapliPlatformName,
+		NapalmPlatformName:  NapalmPlatformName,
+	}
 
-	r.Register(kindNames, func() nodes.Node {
+	nrea := clabnodes.NewNodeRegistryEntryAttributes(
+		defaultCredentials,
+		generateNodeAttributes,
+		platformAttrs,
+	)
+
+	r.Register(kindNames, func() clabnodes.Node {
 		return new(vrVSRX)
 	}, nrea)
 }
 
 type vrVSRX struct {
-	nodes.VRNode
+	clabnodes.VRNode
 }
 
-func (n *vrVSRX) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
+func (n *vrVSRX) Init(cfg *clabtypes.NodeConfig, opts ...clabnodes.NodeOption) error {
 	// Init VRNode
-	n.VRNode = *nodes.NewVRNode(n)
+	n.VRNode = *clabnodes.NewVRNode(n, defaultCredentials, scrapliPlatformName)
 	// set virtualization requirement
 	n.HostRequirements.VirtRequired = true
 
@@ -62,51 +66,36 @@ func (n *vrVSRX) Init(cfg *types.NodeConfig, opts ...nodes.NodeOption) error {
 	}
 	// env vars are used to set launch.py arguments in vrnetlab container
 	defEnv := map[string]string{
-		"USERNAME":           defaultCredentials.GetUsername(),
-		"PASSWORD":           defaultCredentials.GetPassword(),
-		"CONNECTION_MODE":    nodes.VrDefConnMode,
+		"USERNAME":           n.Cfg.Credentials.Username,
+		"PASSWORD":           n.Cfg.Credentials.Password,
+		"CONNECTION_MODE":    clabnodes.VrDefConnMode,
 		"DOCKER_NET_V4_ADDR": n.Mgmt.IPv4Subnet,
 		"DOCKER_NET_V6_ADDR": n.Mgmt.IPv6Subnet,
 	}
-	n.Cfg.Env = utils.MergeStringMaps(defEnv, n.Cfg.Env)
+	n.Cfg.Env = clabutils.MergeStringMaps(defEnv, n.Cfg.Env)
 
 	// mount config dir to support startup-config functionality
-	n.Cfg.Binds = append(n.Cfg.Binds, fmt.Sprint(path.Join(n.Cfg.LabDir, configDirName), ":/config"))
+	n.Cfg.Binds = append(
+		n.Cfg.Binds,
+		fmt.Sprint(path.Join(n.Cfg.LabDir, n.ConfigDirName), ":/config"),
+	)
 
 	if n.Cfg.Env["CONNECTION_MODE"] == "macvtap" {
 		// mount dev dir to enable macvtap
 		n.Cfg.Binds = append(n.Cfg.Binds, "/dev:/dev")
 	}
 
-	n.Cfg.Cmd = fmt.Sprintf("--username %s --password %s --hostname %s --connection-mode %s --trace",
-		defaultCredentials.GetUsername(), defaultCredentials.GetPassword(), n.Cfg.ShortName, n.Cfg.Env["CONNECTION_MODE"])
+	n.Cfg.Cmd = fmt.Sprintf(
+		"--username %s --password %s --hostname %s --connection-mode %s --trace",
+		n.Cfg.Credentials.Username,
+		n.Cfg.Credentials.Password,
+		n.Cfg.ShortName,
+		n.Cfg.Env["CONNECTION_MODE"],
+	)
 
 	n.InterfaceRegexp = InterfaceRegexp
 	n.InterfaceOffset = InterfaceOffset
 	n.InterfaceHelp = InterfaceHelp
 
-	return nil
-}
-
-func (n *vrVSRX) PreDeploy(_ context.Context, params *nodes.PreDeployParams) error {
-	utils.CreateDirectory(n.Cfg.LabDir, 0777)
-	_, err := n.LoadOrGenerateCertificate(params.Cert, params.TopologyName)
-	if err != nil {
-		return nil
-	}
-	return nodes.LoadStartupConfigFileVr(n, configDirName, startupCfgFName)
-}
-
-func (n *vrVSRX) SaveConfig(_ context.Context) error {
-	err := netconf.SaveConfig(n.Cfg.LongName,
-		defaultCredentials.GetUsername(),
-		defaultCredentials.GetPassword(),
-		scrapliPlatformName,
-	)
-	if err != nil {
-		return err
-	}
-
-	log.Infof("saved %s running configuration to startup configuration file\n", n.Cfg.ShortName)
 	return nil
 }

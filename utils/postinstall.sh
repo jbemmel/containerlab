@@ -1,14 +1,24 @@
 #!/bin/sh
 
-# this post install script is used to count the number of installations of containerlab
-# when the installation is done via apt or yum package manager
+# this post install script is used for setting up the clab_admins group
+# and to count the number of installations of containerlab when the installation is done via apt or yum package manager
 
 # exit if sh shell is not found
 if [ ! -e /bin/sh ]; then
     exit 0
 fi
 
-# exit if no /etc/apt/sources.list.d/netdevops.list or /etc/yum.repos.d/yum.fury.io_netdevops_.repo is found
+chmod 4755 /usr/bin/containerlab
+
+if [ ! -f /etc/containerlab/suid_setup_done ]; then
+    groupadd -r clab_admins
+    usermod -aG clab_admins "$SUDO_USER"
+    touch /etc/containerlab/suid_setup_done
+    echo "Please run the command 'sudo usermod -aG clab_admins <insert your username here> && newgrp clab_admins' to ensure that you are part of the Container admin group. You can check this by running 'groups'."
+fi
+
+# exit at this point if no /etc/apt/sources.list.d/netdevops.list or /etc/yum.repos.d/yum.fury.io_netdevops_.repo is found
+# no need to count these installs
 if [ ! -e /etc/apt/sources.list.d/netdevops.list ] && [ ! -e /etc/yum.repos.d/yum.fury.io_netdevops_.repo ]; then
     exit 0
 fi

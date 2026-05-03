@@ -11,16 +11,15 @@ builds:
       - -trimpath
       - -tags=podman exclude_graphdriver_btrfs btrfs_noversion exclude_graphdriver_devicemapper exclude_graphdriver_overlay containers_image_openpgp
     ldflags:
-      - -s -w -X github.com/srl-labs/containerlab/cmd.version={{.Version}} -X github.com/srl-labs/containerlab/cmd.commit={{.ShortCommit}} -X github.com/srl-labs/containerlab/cmd.date={{.Date}}
+      - -s -w -X github.com/srl-labs/containerlab/cmd.Version={{.Version}} -X github.com/srl-labs/containerlab/cmd.commit={{.ShortCommit}} -X github.com/srl-labs/containerlab/cmd.date={{.Date}}
     goos:
       - linux
     goarch:
       - amd64
       - arm64
-    # removing upx compression due to https://github.com/srl-labs/containerlab/issues/1264
-    # hooks:
-    #   post:
-    #     - upx "{{ .Path }}"
+    hooks:
+      post:
+        - chmod 4755 "{{ .Path }}" # set SUID bit
 
 dockers:
   - goos: linux
@@ -93,6 +92,7 @@ nfpms:
       - rpm
       - deb
       - apk
+      - archlinux
     scripts:
       postinstall: ./utils/postinstall.sh
     bindir: /usr/bin

@@ -14,7 +14,7 @@ import (
 	reflect "reflect"
 
 	ns "github.com/containernetworking/plugins/pkg/ns"
-	exec "github.com/srl-labs/containerlab/clab/exec"
+	exec "github.com/srl-labs/containerlab/exec"
 	links "github.com/srl-labs/containerlab/links"
 	nodes "github.com/srl-labs/containerlab/nodes"
 	state "github.com/srl-labs/containerlab/nodes/state"
@@ -62,6 +62,34 @@ func (mr *MockNodeMockRecorder) AddEndpoint(e any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddEndpoint", reflect.TypeOf((*MockNode)(nil).AddEndpoint), e)
 }
 
+// AdoptEndpoint mocks base method.
+func (m *MockNode) AdoptEndpoint(e links.Endpoint) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AdoptEndpoint", e)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AdoptEndpoint indicates an expected call of AdoptEndpoint.
+func (mr *MockNodeMockRecorder) AdoptEndpoint(e any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AdoptEndpoint", reflect.TypeOf((*MockNode)(nil).AdoptEndpoint), e)
+}
+
+// ReleaseEndpoint mocks base method.
+func (m *MockNode) ReleaseEndpoint(e links.Endpoint) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReleaseEndpoint", e)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ReleaseEndpoint indicates an expected call of ReleaseEndpoint.
+func (mr *MockNodeMockRecorder) ReleaseEndpoint(e any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseEndpoint", reflect.TypeOf((*MockNode)(nil).ReleaseEndpoint), e)
+}
+
 // AddLinkToContainer mocks base method.
 func (m *MockNode) AddLinkToContainer(ctx context.Context, link netlink.Link, f func(ns.NetNS) error) error {
 	m.ctrl.T.Helper()
@@ -92,17 +120,17 @@ func (mr *MockNodeMockRecorder) CalculateInterfaceIndex(ifName any) *gomock.Call
 }
 
 // CheckDeploymentConditions mocks base method.
-func (m *MockNode) CheckDeploymentConditions(arg0 context.Context) error {
+func (m *MockNode) CheckDeploymentConditions(ctx context.Context) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CheckDeploymentConditions", arg0)
+	ret := m.ctrl.Call(m, "CheckDeploymentConditions", ctx)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // CheckDeploymentConditions indicates an expected call of CheckDeploymentConditions.
-func (mr *MockNodeMockRecorder) CheckDeploymentConditions(arg0 any) *gomock.Call {
+func (mr *MockNodeMockRecorder) CheckDeploymentConditions(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDeploymentConditions", reflect.TypeOf((*MockNode)(nil).CheckDeploymentConditions), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDeploymentConditions", reflect.TypeOf((*MockNode)(nil).CheckDeploymentConditions), ctx)
 }
 
 // CheckInterfaceName mocks base method.
@@ -260,6 +288,21 @@ func (mr *MockNodeMockRecorder) GetEndpoints() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetEndpoints", reflect.TypeOf((*MockNode)(nil).GetEndpoints))
 }
 
+// GetHostsEntries mocks base method.
+func (m *MockNode) GetHostsEntries(ctx context.Context) (types.HostEntries, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetHostsEntries", ctx)
+	ret0, _ := ret[0].(types.HostEntries)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetHostsEntries indicates an expected call of GetHostsEntries.
+func (mr *MockNodeMockRecorder) GetHostsEntries(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHostsEntries", reflect.TypeOf((*MockNode)(nil).GetHostsEntries), ctx)
+}
+
 // GetImages mocks base method.
 func (m *MockNode) GetImages(arg0 context.Context) map[string]string {
 	m.ctrl.T.Helper()
@@ -286,6 +329,21 @@ func (m *MockNode) GetLinkEndpointType() links.LinkEndpointType {
 func (mr *MockNodeMockRecorder) GetLinkEndpointType() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLinkEndpointType", reflect.TypeOf((*MockNode)(nil).GetLinkEndpointType))
+}
+
+// GetNSPath mocks base method.
+func (m *MockNode) GetNSPath(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNSPath", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNSPath indicates an expected call of GetNSPath.
+func (mr *MockNodeMockRecorder) GetNSPath(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNSPath", reflect.TypeOf((*MockNode)(nil).GetNSPath), ctx)
 }
 
 // GetRuntime mocks base method.
@@ -406,6 +464,20 @@ func (mr *MockNodeMockRecorder) PreDeploy(ctx, params any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PreDeploy", reflect.TypeOf((*MockNode)(nil).PreDeploy), ctx, params)
 }
 
+// PullImage mocks base method.
+func (m *MockNode) PullImage(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PullImage", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PullImage indicates an expected call of PullImage.
+func (mr *MockNodeMockRecorder) PullImage(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PullImage", reflect.TypeOf((*MockNode)(nil).PullImage), ctx)
+}
+
 // RunExec mocks base method.
 func (m *MockNode) RunExec(ctx context.Context, execCmd *exec.ExecCmd) (*exec.ExecResult, error) {
 	m.ctrl.T.Helper()
@@ -436,11 +508,12 @@ func (mr *MockNodeMockRecorder) RunExecFromConfig(arg0, arg1 any) *gomock.Call {
 }
 
 // SaveConfig mocks base method.
-func (m *MockNode) SaveConfig(arg0 context.Context) error {
+func (m *MockNode) SaveConfig(arg0 context.Context) (*nodes.SaveConfigResult, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SaveConfig", arg0)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*nodes.SaveConfigResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // SaveConfig indicates an expected call of SaveConfig.
@@ -459,6 +532,34 @@ func (m *MockNode) SetState(arg0 state.NodeState) {
 func (mr *MockNodeMockRecorder) SetState(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetState", reflect.TypeOf((*MockNode)(nil).SetState), arg0)
+}
+
+// Start mocks base method.
+func (m *MockNode) Start(arg0 context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Start", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Start indicates an expected call of Start.
+func (mr *MockNodeMockRecorder) Start(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockNode)(nil).Start), arg0)
+}
+
+// Stop mocks base method.
+func (m *MockNode) Stop(arg0 context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Stop", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Stop indicates an expected call of Stop.
+func (mr *MockNodeMockRecorder) Stop(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockNode)(nil).Stop), arg0)
 }
 
 // UpdateConfigWithRuntimeInfo mocks base method.

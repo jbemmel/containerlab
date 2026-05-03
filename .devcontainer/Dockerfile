@@ -42,6 +42,10 @@ RUN mkdir -p /root/.docker && echo "{}" > /root/.docker/config.json
 # Maintain SSH_AUTH_SOCK env var when using sudo
 RUN mkdir -p /etc/sudoers.d && echo 'Defaults env_keep += "SSH_AUTH_SOCK"' > /etc/sudoers.d/ssh_auth_sock
 
+# Add vscode user to clab_admins group so that it can run sudo-less clab commands
+# the group is created when clab is installed via the installation script
+RUN usermod -aG clab_admins vscode
+
 # Switch to the vscode user provided by the base image
 USER vscode
 
@@ -51,8 +55,8 @@ COPY ./.devcontainer/dclab /usr/local/bin/dclab
 # Create SSH key for vscode user to enable passwordless SSH to devices
 RUN ssh-keygen -t ecdsa -b 256 -N "" -f ~/.ssh/id_ecdsa
 
-# Install pyenv
-RUN bash -c "$(curl https://pyenv.run)"
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.6.2 /uv /uvx /bin/
 
 # Add empty docker config files to avoid clab warnings for vscode user
 RUN mkdir -p /home/vscode/.docker && echo "{}" > /home/vscode/.docker/config.json
@@ -63,11 +67,3 @@ COPY ./.devcontainer/zsh/.p10k.zsh /home/vscode/.p10k.zsh
 COPY ./.devcontainer/zsh/install-zsh-plugins.sh /tmp/install-zsh-plugins.sh
 COPY ./.devcontainer/zsh/install-tools-completions.sh /tmp/install-tools-completions.sh
 RUN bash -c "/tmp/install-zsh-plugins.sh && /tmp/install-tools-completions.sh"
-
-# Setup pyenv virtual environment for clab tests
-COPY tests/requirements.txt /tmp/requirements.txt
-ENV PYENV_ROOT="/home/vscode/.pyenv"
-ENV PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
-RUN pyenv virtualenv system clab-rf \
-    && pyenv global clab-rf \
-    && pip install -r /tmp/requirements.txt
