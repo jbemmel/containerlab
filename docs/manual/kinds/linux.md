@@ -49,7 +49,40 @@ Containerlab tries to deliver the same level of flexibility in container configu
 * [env](../nodes.md#env) - to set environment variables
 * [user](../nodes.md#user) - to set a user that will be used inside the container system
 * [cmd](../nodes.md#cmd) - to provide a command that will be executed when the container is started
+* [startup-config](#startup-config) - to render a templated config file and mount it into the container
 
 !!!note
     Nodes of `-{{ kind_code_name }}-` kind will have a `on-failure` restart policy when run with docker runtime. This means that if container fails/exits with a non zero return code, docker will restart this container automatically.  
     When restarted, the container will loose all non-`eth0` interfaces. These can be re-added manually with [tools veth](../../cmd/tools/veth/create.md) command.
+
+## Startup config
+
+By default the `-{{ kind_code_name }}-` kind ignores [`startup-config`](../nodes.md#startup-config). Set the `startup-config-path` [kind-specific config key](../nodes.md#kind-specific-config) to an absolute path inside the container to render the startup-config template (with access to the node's [`.Config.Vars`](../nodes.md#config) and topology env vars) and bind-mount the result read-only at that path:
+
+```yaml
+topology:
+  groups:
+    app:
+      kind: -{{ kind_code_name }}-
+      image: example/app:latest
+      startup-config: app.json.tmpl
+      startup-config-path: /config/app.json
+      config:
+        vars:
+          token: lab-token
+  nodes:
+    app1:
+      group: app
+      config:
+        vars:
+          peers: [app2, app3]
+```
+
+with `app.json.tmpl`:
+
+```
+{"name": "{{ .ShortName }}", "token": "{{ index .Config.Vars "token" }}",
+ "peers": {{ index .Config.Vars "peers" | ToJSON }}}
+```
+
+Without `startup-config-path` nothing changes. The rendered file is kept in the node's lab directory and reuses the same [`enforce-startup-config`](../nodes.md#enforce-startup-config) and [`suppress-startup-config`](../nodes.md#suppress-startup-config) behaviour as other kinds. An embedded (multiline) `startup-config` works as well.

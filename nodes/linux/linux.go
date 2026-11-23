@@ -7,6 +7,8 @@ package linux
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -25,10 +27,22 @@ const (
 
 var kindnames = []string{"linux"}
 
+// KindSpecificConfig is the linux kind-specific config, set as keys on the node definition.
+type KindSpecificConfig struct {
+	// StartupConfigPath is the absolute path inside the container where the rendered
+	// startup-config is bind-mounted read-only. When empty, startup-config is ignored.
+	StartupConfigPath string `yaml:"startup-config-path,omitempty" json:"startup-config-path,omitempty"`
+}
+
+var kindSpecificConfig clabnodes.KindSpecificConfigSpec[KindSpecificConfig]
+
+func (n *linux) kindSpecificCfg() *KindSpecificConfig { return kindSpecificConfig.Of(n.Cfg) }
+
 // Register registers the node in the NodeRegistry.
 func Register(r *clabnodes.NodeRegistry) {
 	generateNodeAttributes := clabnodes.NewGenerateNodeAttributes(generateable, generateIfFormat)
-	nrea := clabnodes.NewNodeRegistryEntryAttributes(nil, generateNodeAttributes, nil)
+	nrea := clabnodes.NewNodeRegistryEntryAttributes(nil, generateNodeAttributes, nil).
+		WithKindSpecificConfig(kindSpecificConfig)
 
 	r.Register(kindnames, func() clabnodes.Node {
 		return new(linux)
@@ -66,6 +80,68 @@ func (n *linux) Init(cfg *clabtypes.NodeConfig, opts ...clabnodes.NodeOption) er
 	// but not for the nodes with host network mode, as this is not supported on gh action runners
 	if cfg.Sysctls != nil && n.Config().NetworkMode != "host" {
 		cfg.Sysctls["net.ipv6.conf.all.disable_ipv6"] = "0"
+	}
+
+	return n.setupStartupConfigBind()
+}
+
+// setupStartupConfigBind records a read-only bind for the rendered startup-config when
+// startup-config-path is set. The file itself is written in PreDeploy.
+func (n *linux) setupStartupConfigBind() error {
+	path := n.kindSpecificCfg().StartupConfigPath
+	if path == "" || n.Cfg.SuppressStartupConfig {
+		return nil
+	}
+
+	if err := validateStartupConfigPath(path); err != nil {
+		return fmt.Errorf("node %q: %w", n.Cfg.ShortName, err)
+	}
+
+	if n.Cfg.StartupConfig == "" {
+		return fmt.Errorf("node %q: startup-config-path requires startup-config", n.Cfg.ShortName)
+	}
+
+	hostCfg := filepath.Join(n.Cfg.LabDir, filepath.Base(path))
+	n.Cfg.ResStartupConfig = hostCfg
+	n.Cfg.Binds = append(n.Cfg.Binds, fmt.Sprintf("%s:%s:ro", hostCfg, path))
+
+	return nil
+}
+
+func validateStartupConfigPath(path string) error {
+	if !strings.HasPrefix(path, "/") || strings.HasSuffix(path, "/") || strings.Contains(path, ":") {
+		return fmt.Errorf(
+			"startup-config-path %q must be an absolute container file path",
+			path,
+		)
+	}
+
+	return nil
+}
+
+func (n *linux) PreDeploy(ctx context.Context, params *clabnodes.PreDeployParams) error {
+	if err := n.DefaultNode.PreDeploy(ctx, params); err != nil {
+		return err
+	}
+
+	return n.createStartupConfig()
+}
+
+func (n *linux) createStartupConfig() error {
+	if n.kindSpecificCfg().StartupConfigPath == "" || n.Cfg.SuppressStartupConfig {
+		return nil
+	}
+
+	clabutils.CreateDirectory(n.Cfg.LabDir, clabconstants.PermissionsOpen)
+
+	c, err := os.ReadFile(n.Cfg.StartupConfig)
+	if err != nil {
+		return err
+	}
+
+	err = n.GenerateConfig(n.Cfg.ResStartupConfig, string(c))
+	if err != nil {
+		return fmt.Errorf("node=%s, failed to generate config: %w", n.Cfg.ShortName, err)
 	}
 
 	return nil

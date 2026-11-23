@@ -312,6 +312,11 @@
                     "description": "path to a startup config file (if supported by the kind)",
                     "markdownDescription": "path to a startup [config file](https://containerlab.dev/manual/nodes/#startup-config) (if supported by the kind)"
                 },
+                "startup-config-path": {
+                    "type": "string",
+                    "description": "absolute path inside a linux container where the rendered startup-config is bind-mounted read-only",
+                    "markdownDescription": "absolute path inside a [linux](https://containerlab.dev/manual/kinds/linux/#startup-config) container where the rendered startup-config is bind-mounted read-only. A [kind-specific config](https://containerlab.dev/manual/nodes/#kind-specific-config) key of the `linux` kind"
+                },
                 "startup-delay": {
                     "type": "integer",
                     "description": "Optional startup delay (seconds) to apply",
